@@ -1,0 +1,26 @@
+dynamics:
+  name: FitzHughNagumoParameterised
+  args:
+    parameter_generator:
+      name: Product
+      args:
+        # tau
+        - name: Delta
+          args:
+            value: 0.9
+        # a
+        - name: Delta
+          args: 
+            value: -0.3
+        # b
+        - name: Delta
+          args: 
+            value: 1.8
+sequence_generator:
+  name: LogNormalSqWave
+  args:
+    mean: -0.7
+    std: 0.5
+    period: 8
+
+control_delta: 0.2
