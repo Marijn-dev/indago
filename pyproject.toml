@@ -1,0 +1,42 @@
+[project]
+name = "indago"
+version = "0.1.0"
+description = "A simple package for estimating parameters in control systems."
+readme = "README.md"
+authors = [
+    { name = "Marijn Ruiter", email = "marijnruiter09@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "equinox>=0.11.10",
+    "flumen",
+    "semble",
+    "jax==0.4.25",
+    "jaxlib==0.4.25",
+    "jaxtyping>=0.3.3",
+    "optimistix",
+    "diffrax",
+    "numpy==1.26",
+    "optax>=0.2.2",
+    "pyyaml>=6.0.3",
+    "torch==2.1.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.15,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+flumen = { git = "https://github.com/mcpca/flumen" }
+semble = { git = "https://github.com/mcpca/semble" }
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.7",
+    "python-language-server>=0.36.2",
+    "semble",
+    "wandb>=0.23.1",
+]
