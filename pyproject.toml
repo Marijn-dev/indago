@@ -10,12 +10,13 @@ requires-python = ">=3.11"
 dependencies = [
     "equinox>=0.11.10",
     "flumen",
+    "flumen-jax",
     "semble",
     "jax==0.4.25",
     "jaxlib==0.4.25",
     "jaxtyping>=0.3.3",
     "optimistix",
-    "diffrax",
+    "diffrax", 
     "numpy==1.26",
     "optax>=0.2.2",
     "pyyaml>=6.0.3",
@@ -31,6 +32,7 @@ package = true
 
 [tool.uv.sources]
 flumen = { git = "https://github.com/mcpca/flumen" }
+flumen-jax = { git = "https://github.com/mcpca/flumen-jax"}
 semble = { git = "https://github.com/mcpca/semble" }
 
 [dependency-groups]
