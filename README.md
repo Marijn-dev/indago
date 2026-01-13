@@ -9,7 +9,11 @@ This will create a data file in `./data/fhn_test_data.pkl`.
 
 Then we can use this data and a model trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package to estimate the parameters of the dynamics using the following command:
 ```shell
-  python scripts/estimate_wandb.py data/fhn_test_data.pkl <model_path> fhn_test
+  python scripts/estimate_wandb.py data/fhn_test_data.pkl --model_path <model_path> fhn_test
 ```
 where model ```model_path``` should be replaced by a Weights and Biases model.
 
+Or using the diffrax model using the following command (and setting the model to diffrax in the hyperparams):
+```shell
+  python scripts/estimate_wandb.py data/fhn_test_data.pkl fhn_test
+```
