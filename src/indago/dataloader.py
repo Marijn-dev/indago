@@ -56,6 +56,6 @@ class RawNumPyDataset:
     @property
     def get_params(self) -> Parameter:
         assert jnp.array_equal(self.parameter[0], self.parameter[1]), (
-            "parameters are not the same across trajectories"
+            "parameters are not the same across trajectories in the data"
         )
         return self.parameter[0]

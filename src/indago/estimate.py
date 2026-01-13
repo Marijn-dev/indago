@@ -1,11 +1,13 @@
-import jax
-import jax.numpy as jnp
-import equinox
-import optimistix as optx
+from flumen_jax import Flumen
 from jaxtyping import Float, Array, Bool
 from .typing import Parameter, Aux
-from flumen_jax import Flumen
 from .dataloader import RawNumPyDataset
+from .model import Diffrax
+
+import jax
+import jax.numpy as jnp
+import equinox as eqx
+import optimistix as optx
 
 
 def L1_relative(params_true: Parameter, params_est: Parameter) -> Float:
@@ -23,30 +25,38 @@ class ParameterEstimator:
     def __init__(
         self,
         optim: optx.AbstractMinimiser,
-        model: Flumen,
+        model: Flumen | Diffrax,
         args: tuple[Array, Array, Array, Array, Float, Float],
         init_params: Parameter,
+        model_type,
     ):
         self.optim = optim
         self.model = model
+
+        if model_type == "flumen":
+            self._loss_fn = self._compute_loss_flumen
+        elif model_type == "diffrax":
+            self._loss_fn = self._compute_loss_diffrax
+        else:
+            raise ValueError(f"Loss function for {model_type} not supported")
 
         f_struct = jax.ShapeDtypeStruct((), jnp.float32)
         aux_struct = None
         tags = frozenset()
 
-        self.step = equinox.filter_jit(
-            equinox.Partial(
+        self.step = eqx.filter_jit(
+            eqx.Partial(
                 optim.step,
-                fn=self._compute_loss,
+                fn=self._loss_fn,
                 args=args,
                 options={},
                 tags=tags,
             )
         )
-        self.terminate = equinox.filter_jit(
-            equinox.Partial(
+        self.terminate = eqx.filter_jit(
+            eqx.Partial(
                 optim.terminate,
-                fn=self._compute_loss,
+                fn=self._loss_fn,
                 args=args,
                 options={},
                 tags=tags,
@@ -54,7 +64,7 @@ class ParameterEstimator:
         )
 
         self.state = self.optim.init(
-            fn=self._compute_loss,
+            fn=self._loss_fn,
             y=init_params,
             args=args,
             options={},
@@ -63,19 +73,34 @@ class ParameterEstimator:
             tags=tags,
         )
 
-    @equinox.filter_jit
-    def _compute_loss(self, params, args) -> tuple[Float, Aux]:
+    @eqx.filter_jit
+    def _compute_loss_flumen(self, params, args) -> tuple[Float, Aux]:
         y, x0, u, t, delta, n_trajectories = args
         skips = jnp.floor(t / delta).astype(jnp.uint32)
         tau = (t - delta * skips) / delta
-        eval_trajectory = equinox.filter_vmap(
+        eval_trajectory = eqx.filter_vmap(
             self.model.eval_trajectory,
             in_axes=(0, 0, 0, 0, None),
         )
         y_pred = eval_trajectory(x0, u, tau, skips.squeeze(), params)
 
         loss_val = jnp.mean(jnp.square(y - y_pred))
-        # loss_val = jnp.sum(jnp.square(y - y_pred)) / n_trajectories
+
+        aux = None
+        return loss_val, aux
+
+    @eqx.filter_jit
+    def _compute_loss_diffrax(self, params, args) -> tuple[Float, Aux]:
+        y, x0, u, t, _, n_trajectories = args
+        eval_trajectory = eqx.filter_vmap(
+            self.model.eval_trajectory, in_axes=(0, 0, 0, None)
+        )
+        y_pred = eval_trajectory(x0, u, t, params)
+
+        # integrator can return infinite values and / or NaN values
+        y_pred = jnp.nan_to_num(y_pred, nan=0.0, posinf=0.0, neginf=0.0)
+
+        loss_val = jnp.mean(jnp.square(y - y_pred))
 
         aux = None
         return loss_val, aux
@@ -95,4 +120,4 @@ class ParameterEstimator:
             data.delta,
             len(data),
         )
-        return self._compute_loss(params, data_args)[0]
+        return self._loss_fn(params, data_args)[0]
