@@ -1,0 +1,13 @@
+name: Product
+args:
+  # location 1
+  - name: Uniform
+    args:
+      low: 0.0
+      high: 1.0
+
+  # value 1
+  - name: Uniform
+    args:
+      low: 0.20
+      high: 0.30
