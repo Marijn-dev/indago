@@ -23,18 +23,18 @@ import pickle
 import yaml
 import jax.numpy as jnp
 
-
 hyperparameters = {
-    "n_epochs": 250,
-    "model": "flumen",
-    "optimizer": "BFGS",
+    "n_epochs": 500,
+    "model": "flumen",  # flumen or diffrax
+    "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
     "parameter_loss": "l1_relative",
+    "initial_parameter": [0.2, 0.2],  # data model dependent
 }
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Dopri5",
-    "dt0": 0.1,  # initial step size
+    "integrator": "Dopri5",  # Dopri5, Dopri8,
+    "dt0": 0.01,  # initial step size
 }
 
 
@@ -70,13 +70,20 @@ def main():
 
         with open(model_path / "metadata.yaml", "r") as f:
             metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+        delta = metadata["data_settings"]["control_delta"]
 
     elif hyperparameters["model"] == "diffrax":
         model_path = None
         metadata = None
         hyperparameters.update(settings_diffrax)
+        delta = None
 
-    run = wandb.init(project="indago", config=hyperparameters, name=full_name)
+    run = wandb.init(
+        project="indago",
+        entity="aguiar-kth-royal-institute-of-technology",
+        config=hyperparameters,
+        name=full_name,
+    )
 
     with data_path.open("rb") as f:
         data = pickle.load(f)
@@ -94,9 +101,6 @@ def main():
     val_data = RawNumPyDataset(data["val"])
     test_data = RawNumPyDataset(data["test"])
 
-    delta = train_data.delta
-
-    # Batching is not (yet) implemented
     y, x0, u, t = train_data[0:]
     train_data_args = (
         jnp.array(y),
@@ -108,7 +112,11 @@ def main():
     )
 
     true_params = train_data.get_params
-    init_params = jnp.zeros_like(true_params)  # start estimation with zeros
+    init_params = jnp.array(
+        wandb.config["initial_parameter"], dtype=jnp.float32
+    )
+    print("Starting estimation with: ", init_params)
+    print("True params: ", true_params)
 
     optim = get_optimizer(wandb.config["optimizer"])
     params_loss_fn = get_parameter_loss(wandb.config["parameter_loss"])
@@ -116,7 +124,6 @@ def main():
     parameter_estimator = ParameterEstimator(
         optim, model, train_data_args, init_params, wandb.config["model"]
     )
-
     est_params, done_training = parameter_estimator.train_step(init_params)
     early_stop = False  # not yet implemented
 
@@ -125,18 +132,40 @@ def main():
     params_loss = params_loss_fn(true_params, est_params)
 
     print_header()
-    print_losses(0, train_loss, val_loss, params_loss)
+    print_losses(0, train_loss, val_loss, params_loss, est_params)
 
+    wandb.log(
+        {
+            # "time [s]": 0,
+            "epoch": 0,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "params_loss": params_loss,
+            "params_est": est_params[0],
+        }
+    )
     time_start = time()
     for epoch in range(wandb.config["n_epochs"]):
         est_params, done_training = parameter_estimator.train_step(est_params)
         train_loss = parameter_estimator.validate(est_params, train_data)
         val_loss = parameter_estimator.validate(est_params, val_data)
         params_loss = params_loss_fn(true_params, est_params)
-        print_losses(epoch + 1, train_loss, val_loss, params_loss)
-
+        print_losses(epoch, train_loss, val_loss, params_loss, est_params)
+        est_time = time() - time_start
+        wandb.log(
+            {
+                "time [s]": est_time,
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "params_loss": params_loss,
+                "params_est": est_params[0],
+            }
+        )
         if done_training or early_stop:
-            print(f"Stopping training at Epoch {epoch + 1}")
+            print(
+                f"Stopping training at Epoch {epoch + 1}, estimation took {est_time:.3f} [s]"
+            )
             run.summary["final_train"] = train_loss
             run.summary["final_val"] = val_loss
             run.summary["test"] = parameter_estimator.validate(
@@ -146,18 +175,9 @@ def main():
             run.summary["init_params"] = init_params
             run.summary["true_params"] = true_params
             run.summary["params_loss"] = params_loss
-            run.summary["training time [s]"] = time() - time_start
+            run.summary["training time [s]"] = est_time
+            run.summary["iterations"] = epoch
             break
-
-        wandb.log(
-            {
-                "time [s]": time() - time_start,
-                "epoch": epoch + 1,
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-                "params_loss": params_loss,
-            }
-        )
 
 
 if __name__ == "__main__":
