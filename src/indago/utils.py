@@ -1,6 +1,6 @@
-from semble import ParameterisedTrajectorySampler
+from semble import Dynamics, get_dynamics
 from .estimate import L1_relative, L2_relative
-from .model import Diffrax
+from .model import Diffrax, Dynamics_JAX, ParameterisedCellTransmissionModel_Jax
 from flumen_jax import Flumen
 from jax import random as jrd
 
@@ -15,18 +15,33 @@ import numpy as np
 import wandb
 
 
+def return_dynamics_jax(data_settings):
+    which = data_settings["dynamics"]["name"]
+    dynamics: Dynamics = get_dynamics(which, data_settings["dynamics"]["args"])
+    delta = data_settings["control_delta"]
+
+    if which == "VanDerPolParameterised":
+        return Dynamics_JAX(dynamics, delta)
+    elif which == "ParameterisedCellTransmissionModel":
+        return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
+    else:
+        print(f"Data model {which} not implemented")
+
+
 def return_integrator(which: str) -> dfx.AbstractERK:
     if which == "Dopri5":
         return dfx.Dopri5()
     elif which == "Dopri8":
         return dfx.Dopri8()
+    elif which == "Euler":
+        return dfx.Euler()
     else:
         raise ValueError(f"Integrator {which} not supported")
 
 
 def return_model(
     which: str,
-    trajectory_sampler: ParameterisedTrajectorySampler,
+    dynamics_jax: Dynamics_JAX,
     metadata=None,
     model_path=None,
     diffrax_settings=None,
@@ -42,7 +57,7 @@ def return_model(
 
     elif which == "diffrax":
         integrator = return_integrator(diffrax_settings["integrator"])
-        model = Diffrax(trajectory_sampler, integrator, diffrax_settings["dt0"])
+        model = Diffrax(dynamics_jax, integrator, diffrax_settings["dt0"])
 
     else:
         raise ValueError(f"Unknown model {which}.")
@@ -103,7 +118,7 @@ def get_timestamp() -> str:
     return ts
 
 
-def log_loss_histogram(loss_list, title="", bins=10):
+def log_loss_histogram(loss_list, title="", bins=20):
     """
     Plots a histogram of the losses and logs it to wandb.
 

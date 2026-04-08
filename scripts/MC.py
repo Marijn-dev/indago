@@ -4,21 +4,18 @@ from argparse import ArgumentParser
 from pathlib import Path
 from indago.estimate import ParameterEstimator
 from indago.dataloader import RawNumPyDataset
-from time import time
+from indago.model import Dynamics_JAX, Diffrax
+from flumen_jax import Flumen
 from semble import (
-    make_trajectory_sampler,
-    TSamplerSpec,
-    ParameterisedTrajectorySampler,
     get_parameter_generator,
     ParameterGenerator,
 )
 from indago.utils import (
     return_model,
+    return_dynamics_jax,
     get_optimizer,
     get_parameter_loss,
     get_timestamp,
-    print_header,
-    print_losses,
     log_loss_histogram,
 )
 
@@ -28,6 +25,8 @@ import pickle
 import yaml
 import jax.numpy as jnp
 import numpy as np
+import os
+import torch
 
 hyperparameters = {
     "n_epochs": 1000,  # max number of epochs
@@ -39,7 +38,7 @@ hyperparameters = {
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Dopri5",  # Dopri5, Dopri8,
+    "integrator": "Dopri5",  # Dopri5, Dopri8, Euler
     "dt0": 0.01,  # initial step size
 }
 
@@ -84,13 +83,16 @@ def estimation_run(
 
 def main():
     args = parse_args()
-    data_path = Path(args.data_path)
     rng = np.random.default_rng(seed=hyperparameters["NUMPY_KEY_SEED"])
     param_rng = rng.spawn(1)[0]
 
     timestamp = get_timestamp()
     full_name = "_".join([timestamp] + args.name)
     full_name = re.sub("[^a-zA-Z0-9_-]", "_", full_name)
+
+    data_path = Path(args.data_path)
+    with data_path.open("rb") as f:
+        data = pickle.load(f)
 
     if hyperparameters["model"] == "flumen":
         assert args.model_path, "no model path given"
@@ -100,13 +102,20 @@ def main():
 
         with open(model_path / "metadata.yaml", "r") as f:
             metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
-        delta = metadata["data_settings"]["control_delta"]
+        model: Flumen = return_model(
+            hyperparameters["model"],
+            None,
+            metadata,
+            model_path,
+            hyperparameters,
+        )
 
     elif hyperparameters["model"] == "diffrax":
-        model_path = None
-        metadata = None
+        dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
         hyperparameters.update(settings_diffrax)
-        delta = None
+        model: Diffrax = return_model(
+            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
+        )
 
     with open(args.param_settings, "r") as f:
         param_settings = yaml.load(f, Loader=yaml.FullLoader)
@@ -120,22 +129,9 @@ def main():
         config=hyperparameters,
         name=full_name,
     )
-    with data_path.open("rb") as f:
-        data = pickle.load(f)
 
     parameter_generator: ParameterGenerator = get_parameter_generator(
         param_settings["name"], param_settings["args"]
-    )
-
-    sampler_spec: TSamplerSpec = data["settings"]
-    sampler: ParameterisedTrajectorySampler = make_trajectory_sampler(
-        sampler_spec
-    )
-
-    sampler.reset_rngs()
-
-    model = return_model(
-        wandb.config["model"], sampler, metadata, model_path, hyperparameters
     )
 
     train_data = RawNumPyDataset(data["train"])
@@ -148,7 +144,7 @@ def main():
         jnp.array(x0),
         jnp.array(u),
         jnp.array(t),
-        delta,
+        train_data.delta,
         len(train_data),
     )
 
@@ -162,6 +158,8 @@ def main():
     n_succesful_runs = 0
     iterations = []
     param_loss_list = []
+    true_params_list = []
+    est_params_list = []
     for i in range(wandb.config["runs"]):
         print("simulation: ", i + 1, "/", wandb.config["runs"])
         init_params = parameter_generator.sample(param_rng)
@@ -172,6 +170,10 @@ def main():
             parameter_estimator,
             wandb.config["n_epochs"],
         )
+
+        est_params_list.append(est_params)
+        true_params_list.append(true_params)
+
         print("init params:", init_params, "est params:", est_params)
 
         iterations.append(iter)
@@ -180,6 +182,26 @@ def main():
 
         if param_loss < 0.01:
             n_succesful_runs += 1
+
+    results = {
+        "iterations": iterations,
+        "est_params": est_params_list,
+        "true_params": true_params_list,
+        "param_loss": param_loss_list,
+        "n_successul_runs": n_succesful_runs,
+        "n_runs": wandb.config["runs"],
+    }
+
+    torch.save(results, "results_dict.pth")
+    results_artifact = wandb.Artifact(
+        name=f"run_data_{wandb.run.id}",
+        type="eval_results",
+        description="Raw iteration and parameter loss lists",
+    )
+
+    results_artifact.add_file("results_dict.pth")
+    os.remove("results_dict.pth")
+    wandb.log_artifact(results_artifact)
 
     wandb.log({"images/iterations": log_loss_histogram(iterations, bins=20)})
     # plt.close(fig)

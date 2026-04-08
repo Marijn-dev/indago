@@ -2,14 +2,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 from indago.estimate import ParameterEstimator
 from indago.dataloader import RawNumPyDataset
+from indago.model import Dynamics_JAX
 from time import time
-from semble import (
-    make_trajectory_sampler,
-    TSamplerSpec,
-    ParameterisedTrajectorySampler,
-)
+from flumen_jax import Flumen
 from indago.utils import (
     return_model,
+    return_dynamics_jax,
     get_optimizer,
     get_parameter_loss,
     get_timestamp,
@@ -25,15 +23,16 @@ import jax.numpy as jnp
 
 hyperparameters = {
     "n_epochs": 500,
-    "model": "flumen",  # flumen or diffrax
+    "model": "diffrax",  # flumen or diffrax
     "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
     "parameter_loss": "l1_relative",
-    "initial_parameter": [0.2, 0.2],  # data model dependent
+    # "initial_parameter": [0.45, 0.25],  # dimension is data model dependent
+    "initial_parameter": [0.1],  # dimension is data model dependent
 }
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Dopri5",  # Dopri5, Dopri8,
+    "integrator": "Euler",  # Dopri5, Dopri8, Euler
     "dt0": 0.01,  # initial step size
 }
 
@@ -62,6 +61,9 @@ def main():
     full_name = "_".join([timestamp] + args.name)
     full_name = re.sub("[^a-zA-Z0-9_-]", "_", full_name)
 
+    with data_path.open("rb") as f:
+        data = pickle.load(f)
+
     if hyperparameters["model"] == "flumen":
         assert args.model_path, "no model path given"
         api = wandb.Api()
@@ -70,31 +72,26 @@ def main():
 
         with open(model_path / "metadata.yaml", "r") as f:
             metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
-        delta = metadata["data_settings"]["control_delta"]
+        model: Flumen = return_model(
+            hyperparameters["model"],
+            None,
+            metadata,
+            model_path,
+            hyperparameters,
+        )
 
     elif hyperparameters["model"] == "diffrax":
-        model_path = None
-        metadata = None
+        dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
         hyperparameters.update(settings_diffrax)
-        delta = None
+        model = return_model(
+            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
+        )
 
     run = wandb.init(
         project="indago",
         entity="aguiar-kth-royal-institute-of-technology",
         config=hyperparameters,
         name=full_name,
-    )
-
-    with data_path.open("rb") as f:
-        data = pickle.load(f)
-
-    sampler_spec: TSamplerSpec = data["settings"]
-    sampler: ParameterisedTrajectorySampler = make_trajectory_sampler(
-        sampler_spec
-    )
-    sampler.reset_rngs()
-    model = return_model(
-        wandb.config["model"], sampler, metadata, model_path, hyperparameters
     )
 
     train_data = RawNumPyDataset(data["train"])
@@ -107,7 +104,7 @@ def main():
         jnp.array(x0),
         jnp.array(u),
         jnp.array(t),
-        delta,
+        train_data.delta,
         len(train_data),
     )
 
