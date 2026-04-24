@@ -1,29 +1,7 @@
 from argparse import ArgumentParser
-from math import floor
 from pathlib import Path
 from time import time
-from indago.model import (
-    Diffrax,
-    Dynamics_JAX,
-    ParameterisedCellTransmissionModelNonSmooth_Jax,
-    ParameterisedCellTransmissionModelSmooth_Jax,
-    ParameterisedCellTransmissionModel_Numpy,
-)
-from scipy.integrate import solve_ivp
-from semble.initial_state import (
-    InitialStateGenerator,
-    get_initial_state_generator,
-)
-from semble.sequence_generators import SequenceGenerator, get_sequence_generator
-from semble.parameter_generators import (
-    ParameterGenerator,
-    get_parameter_generator,
-)
-from semble.dynamics import (
-    ParameterisedCellTransmissionModel,
-    GreenshieldsTraffic,
-)
-from flumen_jax import Flumen
+from random import uniform
 
 import diffrax
 import equinox
@@ -35,6 +13,25 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import yaml
+from flumen_jax import Flumen
+from scipy.integrate import solve_ivp
+from semble.dynamics import (
+    ParameterisedCellTransmissionModel,
+)
+from semble.initial_state import (
+    InitialStateGenerator,
+    get_initial_state_generator,
+)
+from semble.parameter_generators import (
+    ParameterGenerator,
+    get_parameter_generator,
+)
+from semble.sequence_generators import SequenceGenerator, get_sequence_generator
+
+from indago.model import (
+    ParameterisedCellTransmissionModel_Numpy,
+    ParameterisedCellTransmissionModelNonSmooth_Jax,
+)
 
 plt.rcParams.update(
     {
@@ -54,55 +51,51 @@ SCIPY_RTOL = 1e-9
 NUMPY_RNG_SEED = 73577678
 
 
-class GreenshieldsNumpy:
-    def __init__(self, dynamics: GreenshieldsTraffic, delta: float):
-        super().__init__()
-        self.delta = delta
-        self.v0 = dynamics.v0
-        self.inv_step = dynamics.inv_step
-
-    def __call__(self, t, y, u):
-        n_control = int(floor(t / self.delta))
-        u_val = u[n_control]
-
-        q_out = self.v0 * y * (1.0 - y)
-        q0_in = self.v0 * u_val * (1.0 - u_val)
-
-        q_in = np.hstack((q0_in, q_out[:-1]))
-
-        dy = self.inv_step * (q_in - q_out)
-        return dy
+def flux_interp(x, sigma_i, q_max):
+    locs = jnp.array([0.0, sigma_i, 1.0])
+    vals = jnp.array([0.0, q_max, 0.0])
+    return jnp.interp(x, locs, vals)
 
 
-class GreenshieldsJax:
-    def __init__(self, dynamics: GreenshieldsTraffic, delta: float):
-        super().__init__()
-        self.v0 = dynamics.v0
-        self.inv_step = dynamics.inv_step
-        self.delta = delta
+def ctm_dx(x, inv_step, u_val, sigma_i, q_max):
+    x_minus_one = jnp.hstack((u_val, x[:-1]))
+    x_plus_one = jnp.hstack((x[1:], jnp.zeros_like(u_val)))
 
-    def __call__(self, t, y, u_vec):
-        index = jnp.floor(t / self.delta).astype(jnp.uint32)
-        u_val = u_vec[index]
-        q_out = self.v0 * y * (1.0 - y)
-        q0_in = self.v0 * u_val * (1.0 - u_val)
+    d_prev = flux_interp(jnp.minimum(x_minus_one, sigma_i), sigma_i, q_max)
+    s_this = flux_interp(jnp.maximum(x, sigma_i), sigma_i, q_max)
+    q_prev = jnp.minimum(d_prev, s_this)
 
-        q_in = jnp.hstack((q0_in, q_out[:-1]))
+    d_this = flux_interp(jnp.minimum(x, sigma_i), sigma_i, q_max)
+    s_next = flux_interp(jnp.maximum(x_plus_one, sigma_i), sigma_i, q_max)
+    q_this = jnp.minimum(d_this, s_next)
 
-        dy = self.inv_step * (q_in - q_out)
+    dx = inv_step * (q_prev - q_this)
 
-        return dy
+    return dx
 
 
-def error_stats(y_true, y_other) -> tuple[float, float]:
+def eval_u(uvals, delta, ts):
+    return uvals[jnp.floor(ts / delta).astype(jnp.uint32)]
+
+
+def euler_scan(timestep: float, init_state, us, ctm_inv_step, param):
+    sigma, q = param
+
+    def f(x, u):
+        return x + timestep * ctm_dx(x, ctm_inv_step, u, sigma, q), x
+
+    x_last, xs = jax.lax.scan(f, init_state, us)
+
+    return jnp.concatenate((xs, jnp.expand_dims(x_last, 0)), axis=0)
+
+
+def rrmse(y_true, y_other):
     error = np.mean(
         np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true),
         axis=1,
     )
-    mean = np.mean(error, axis=0)
-    std = np.std(error, axis=0)
 
-    return mean.item(), std.item()
+    return error
 
 
 def solve_flumen_traj(flat_model, model_treedef, t, x0, u, delta, params):
@@ -166,9 +159,11 @@ def compute_times_and_errors(
     u,
     params,
     delta: float,
-    dt0=0.01,
+    dts: list,
     use_batched=False,
 ):
+    dts.sort()
+
     def scipy_compute(x0, u, params, y, func):
         t = time()
         for k, (x_, u_, params_) in enumerate(
@@ -190,7 +185,6 @@ def compute_times_and_errors(
         return (time() - t) / (x0.shape[0] - n_warmup)
 
     time_vector = np.linspace(0.0, time_horizon, n_time_samples)
-    ts = diffrax.SaveAt(ts=time_vector)
 
     dynf_np = ParameterisedCellTransmissionModel_Numpy(dynamics, delta)
 
@@ -210,45 +204,38 @@ def compute_times_and_errors(
     _ = scipy_compute(x0, u, params, y_scipy, scipy_func)
     y_scipy = np.transpose(y_scipy, axes=(0, 2, 1))
 
-    # Smooth
-    # dynf = ParameterisedCellTransmissionModelSmooth_Jax(dynamics, delta)
-    # Non smooth
+    euler_results = []
+
+    for dt in dts:
+        inv_dx = dynf_np.inv_step
+        n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+        ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+
+        @jax.jit
+        def euler_func(x, u, params):
+            us = eval_u(u, delta, ts_euler[:-1])
+            ys = euler_scan(dt, x, us, inv_dx, params)
+            return jax.vmap(
+                lambda y: jnp.interp(time_vector, ts_euler, y),
+                in_axes=1,
+                out_axes=1,
+            )(ys)
+
+        y_euler = np.empty_like(y_scipy)
+        t_euler = warmup_and_time(x0, u, params, y_euler, euler_func)
+
+        error_euler = rrmse(y_scipy, y_euler)
+
+        euler_results.append(
+            {
+                "Method": f"Euler (dt={dt})",
+                r"$T$": time_horizon,
+                "Time per trajectory (s)": t_euler,
+                "RRMSE": error_euler,
+            }
+        )
+
     dynf = ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
-    solver = diffrax.Euler()
-    stepsize_controller = diffrax.ConstantStepSize()
-    ode_term = diffrax.ODETerm(dynf)
-    ts = diffrax.SaveAt(ts=time_vector)
-
-    @jax.jit
-    def diffrax_euler_func(x, u, params):
-        return diffrax.diffeqsolve(
-            ode_term,
-            solver,
-            t0=0.0,
-            t1=time_horizon,
-            dt0=dt0,
-            y0=x,
-            args=(u, params),
-            saveat=ts,
-            stepsize_controller=stepsize_controller,
-            max_steps=None,
-        ).ys
-
-    y_diffrax_euler = np.empty_like(y_scipy)
-    t_diffrax_euler = warmup_and_time(
-        x0, u, params, y_diffrax_euler, diffrax_euler_func
-    )
-
-    mean_err_euler, std_err_euler = error_stats(y_scipy, y_diffrax_euler)
-
-    euler_results = {
-        "Method": "Euler",
-        r"$T$": time_horizon,
-        "Time per trajectory (s)": t_diffrax_euler,
-        "Relative error (mean)": mean_err_euler,
-        "Relative error (std)": std_err_euler,
-    }
-
     solver = diffrax.Tsit5()
     stepsize_controller = diffrax.PIDController(atol=1e-3, rtol=1e-6)
     ode_term = diffrax.ODETerm(dynf)
@@ -261,12 +248,11 @@ def compute_times_and_errors(
             solver,
             t0=0.0,
             t1=time_horizon,
-            dt0=dt0,
+            dt0=dts[0],
             y0=x,
             args=(u, params),
             saveat=ts,
             stepsize_controller=stepsize_controller,
-            # stepsize_controller=diffrax.ConstantStepSize(),
             max_steps=None,
         ).ys
 
@@ -275,14 +261,13 @@ def compute_times_and_errors(
         x0, u, params, y_diffrax_tsit5, diffrax_tsit5_func
     )
 
-    mean_err_tsit5, std_err_tsit5 = error_stats(y_scipy, y_diffrax_tsit5)
+    tsit5_error = rrmse(y_scipy, y_diffrax_tsit5)
 
     tsit5_results = {
         "Method": "Tsit5",
         r"$T$": time_horizon,
         "Time per trajectory (s)": t_diffrax_tsit5,
-        "Relative error (mean)": mean_err_tsit5,
-        "Relative error (std)": std_err_tsit5,
+        "RRMSE": tsit5_error,
     }
 
     y_flumen = np.empty_like(y_scipy)
@@ -304,26 +289,25 @@ def compute_times_and_errors(
         )
 
     t_flumen = warmup_and_time(x0, u, params, y_flumen, flumen_func)
-    mean_err_flumen, std_err_flumen = error_stats(y_scipy, y_flumen)
+    error_flumen = rrmse(y_scipy, y_flumen)
 
     flumen_results = {
         "Method": "Flumen",
         r"$T$": time_horizon,
         "Time per trajectory (s)": t_flumen,
-        "Relative error (mean)": mean_err_flumen,
-        "Relative error (std)": std_err_flumen,
+        "RRMSE": error_flumen,
     }
 
-    return euler_results, tsit5_results, flumen_results
+    return *euler_results, tsit5_results, flumen_results
 
 
 def main(args):
-    # model_path = Path(args.path)
-    import wandb
+    model_path = Path(args.path)
+    # import wandb
 
-    api = wandb.Api()
-    model_artifact = api.artifact(args.path)
-    model_path = Path(model_artifact.download())
+    # api = wandb.Api()
+    # model_artifact = api.artifact(args.path)
+    # model_path = Path(model_artifact.download())
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
@@ -351,13 +335,13 @@ def main(args):
     else:
         init_state_gen = dynamics.default_initial_state()
 
-    # avoid division by 0 so location U(0.1,0.9)
-    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["high"] = (
-        0.9
-    )
-    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["low"] = (
-        0.1
-    )
+    # # avoid division by 0 so location U(0.1,0.9)
+    # ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["high"] = (
+    #     0.9
+    # )
+    # ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["low"] = (
+    #     0.1
+    # )
 
     par_gen = get_parameter_generator(
         ds["dynamics"]["args"]["parameter_generator"]["name"],
@@ -394,13 +378,21 @@ def main(args):
             u,
             params,
             delta,
-            args.diffrax_dt0,
+            args.dts,
             args.use_batched,
         )
 
         all_results.extend(results)
 
-    times_and_errors = pd.DataFrame(all_results)
+    times_and_errors = pd.DataFrame(all_results).explode("RRMSE")
+
+    # get true times
+    times = times_and_errors["Time per trajectory (s)"].unique()
+
+    # jitter times to make it look nicer
+    times_and_errors["Time per trajectory (s)"] = times_and_errors[
+        "Time per trajectory (s)"
+    ].apply(lambda x: x * (1 + uniform(-0.1, 0.1)))
 
     print(times_and_errors)
 
@@ -416,15 +408,16 @@ def main(args):
 
     # map each T to a color
     # palette = dict(zip(T_values, colors))
-    sns.scatterplot(
+    sp = sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
-        y="Relative error (mean)",
-        style="Method",
-        hue=r"$T$",
+        y="RRMSE",
+        hue="Method",
         palette="colorblind",
         ax=ax,
     )
+    for t in times:
+        ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
     plt.savefig("time_traj_eval_param_clb_smooth.pdf")
     plt.show()
@@ -453,7 +446,7 @@ def parse_args():
     )
     ap.add_argument("--use_batched", action="store_true")
     ap.add_argument("--plot", action="store_true")
-    ap.add_argument("--diffrax_dt0", type=float, default=0.01)
+    ap.add_argument("--dts", type=float, nargs="+", default=[0.005])
 
     return ap.parse_args()
 
