@@ -419,7 +419,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("time_traj_eval_param_clb_smooth.pdf")
+    plt.savefig("time_traj_eval_param_nonsmooth_nointerp_t01.pdf")
     plt.show()
 
 
