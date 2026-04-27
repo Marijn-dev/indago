@@ -335,14 +335,13 @@ def main(args):
     else:
         init_state_gen = dynamics.default_initial_state()
 
-    # # avoid division by 0 so location U(0.1,0.9)
-    # ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["high"] = (
-    #     0.9
-    # )
-    # ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["low"] = (
-    #     0.1
-    # )
-
+    # Make sure velocity is upper bounded for Euler's method.
+    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["high"] = (
+        0.9
+    )
+    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["low"] = (
+        0.1
+    )
     par_gen = get_parameter_generator(
         ds["dynamics"]["args"]["parameter_generator"]["name"],
         ds["dynamics"]["args"]["parameter_generator"]["args"],
@@ -408,7 +407,7 @@ def main(args):
 
     # map each T to a color
     # palette = dict(zip(T_values, colors))
-    sp = sns.scatterplot(
+    sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
         y="RRMSE",
