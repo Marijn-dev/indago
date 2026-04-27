@@ -8,8 +8,8 @@ dynamics:
 sequence_generator:
   name: GaussianSqWave
   args:
-    period: 1
-control_delta: 0.2
+    period: 2
+control_delta: 0.5
 initial_state_generator:
   name: UniformInitialState
   args:
