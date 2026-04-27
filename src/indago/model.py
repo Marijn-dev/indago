@@ -160,7 +160,7 @@ class ParameterisedCellTransmissionModel_Numpy:
         self.locs = None
         self.vals = None
         self.sigma_i = None
-        self.flux = self.flux_nointerp  # flux_interp / flux_nointerp
+        self.flux = self.flux_interp  # flux_interp / flux_nointerp
 
     def flux_nointerp(self, x):
         return np.minimum(
@@ -223,13 +223,12 @@ class Diffrax:
         self._integrator = integrator
         self.initial_time = 0
         self._dt0 = dt0
+        self._ode_term = dfx.ODETerm(self.dynamics)
 
     # this filter jit is necessary
     @eqx.filter_jit
     def eval_trajectory(self, x0, u, t_samples, params):
         t_samples = t_samples.reshape(-1)  # [seq_len, 1] -> [seq_len]
-        self.dynamics._set_parameter(params)
-        self._ode_term = dfx.ODETerm(self.dynamics._dx)
         solution = dfx.diffeqsolve(
             self._ode_term,
             self._integrator,
@@ -237,13 +236,15 @@ class Diffrax:
             t1=t_samples[-1],
             dt0=self._dt0,
             y0=x0,
-            args=u,
+            args=(u, params),
             saveat=dfx.SaveAt(ts=t_samples),
             # adjoint=dfx.DirectAdjoint(),
             # adjoint=dfx.BacksolveAdjoint(),
             # adjoint=dfx.RecursiveCheckpointAdjoint(),
             # stepsize_controller=dfx.PIDController(atol=1e-3, rtol=1e-6),
-            max_steps=10000,  # default = 4096
+            stepsize_controller=dfx.ConstantStepSize(),
+            # stepsize_controller=dfx.PIDController(atol=1e-2, rtol=1e-2),
+            max_steps=1000000000,  # default = 4096
         )
         # print(solution.adjoint)
 
