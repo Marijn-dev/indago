@@ -1,6 +1,10 @@
 from semble import Dynamics, get_dynamics
-from .estimate import L1_relative, L2_relative
-from .model import Diffrax, Dynamics_JAX, ParameterisedCellTransmissionModel_Jax
+from .estimate import L1_relative, L2_relative, RRMSE
+from .model import (
+    Diffrax,
+    Dynamics_JAX,
+    ParameterisedCellTransmissionModelNonSmooth_Jax,
+)
 from flumen_jax import Flumen
 from jax import random as jrd
 
@@ -23,7 +27,8 @@ def return_dynamics_jax(data_settings):
     if which == "VanDerPolParameterised":
         return Dynamics_JAX(dynamics, delta)
     elif which == "ParameterisedCellTransmissionModel":
-        return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
+        # return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
+        return ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
     else:
         print(f"Data model {which} not implemented")
 
@@ -35,6 +40,8 @@ def return_integrator(which: str) -> dfx.AbstractERK:
         return dfx.Dopri8()
     elif which == "Euler":
         return dfx.Euler()
+    elif which == "Tsit5":
+        return dfx.Tsit5()
     else:
         raise ValueError(f"Integrator {which} not supported")
 
@@ -83,7 +90,7 @@ def print_losses(
     est_params: float,
 ):
     print(
-        f"{epoch + 1:>5d} :: {train:>16.5e} :: {val:>16.5e} :: {params:>16.5e} :: {est_params[0]}"
+        f"{epoch:>5d} :: {train:>16.5e} :: {val:>16.5e} :: {params:>16.5e} :: {est_params[0]}"
     )
 
 
@@ -107,6 +114,8 @@ def get_parameter_loss(which: str):
         return L1_relative
     elif which == "l2_relative":
         return L2_relative
+    elif which == "RRMSE":
+        return RRMSE
     else:
         raise ValueError(f"Unknown parameter loss function {which}.")
 

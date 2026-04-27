@@ -25,14 +25,14 @@ hyperparameters = {
     "n_epochs": 500,
     "model": "diffrax",  # flumen or diffrax
     "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
-    "parameter_loss": "l1_relative",
-    # "initial_parameter": [0.45, 0.25],  # dimension is data model dependent
-    "initial_parameter": [0.1],  # dimension is data model dependent
+    "parameter_loss": "RRMSE", # l1_relative, l2_relative, RRMSE
+    # "initial_parameter": [0.0814, 0.2669],  # dimension is data model dependent
+    "initial_parameter": [0.0],  # dimension is data model dependent
 }
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Euler",  # Dopri5, Dopri8, Euler
+    "integrator": "Tsit5",  # Dopri5, Dopri8, Euler, Tsit5
     "dt0": 0.01,  # initial step size
 }
 
@@ -141,13 +141,14 @@ def main():
             "params_est": est_params[0],
         }
     )
+    print("starting estimation...")
     time_start = time()
     for epoch in range(wandb.config["n_epochs"]):
         est_params, done_training = parameter_estimator.train_step(est_params)
         train_loss = parameter_estimator.validate(est_params, train_data)
         val_loss = parameter_estimator.validate(est_params, val_data)
         params_loss = params_loss_fn(true_params, est_params)
-        print_losses(epoch, train_loss, val_loss, params_loss, est_params)
+        print_losses(epoch+1, train_loss, val_loss, params_loss, est_params)
         est_time = time() - time_start
         wandb.log(
             {
@@ -163,6 +164,9 @@ def main():
             print(
                 f"Stopping training at Epoch {epoch + 1}, estimation took {est_time:.3f} [s]"
             )
+            param_found = True if params_loss < 0.05 else False
+            print(f"estimation done in {epoch + 1} iterations, parameter found: {param_found}")
+            print(f"final parameter error {params_loss}")
             run.summary["final_train"] = train_loss
             run.summary["final_val"] = val_loss
             run.summary["test"] = parameter_estimator.validate(
@@ -173,7 +177,7 @@ def main():
             run.summary["true_params"] = true_params
             run.summary["params_loss"] = params_loss
             run.summary["training time [s]"] = est_time
-            run.summary["iterations"] = epoch
+            run.summary["iterations"] = epoch + 1
             break
 
 

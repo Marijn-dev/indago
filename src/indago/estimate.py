@@ -20,6 +20,12 @@ def L2_relative(params_true: Parameter, params_est: Parameter) -> Float:
     true_norm = jnp.linalg.norm(params_true)
     return diff_norm / (true_norm + 1e-8)
 
+def RRMSE(params_true: Parameter, params_est: Parameter) -> Float:
+    MSE = jnp.mean((params_est - params_true)**2)
+    RMSE = jnp.sqrt(MSE)
+    norm_true = jnp.sqrt(jnp.mean((params_true**2)))
+    RRMSE = RMSE/norm_true
+    return RRMSE
 
 class ParameterEstimator:
     def __init__(
@@ -109,7 +115,7 @@ class ParameterEstimator:
     @eqx.filter_jit
     def _compute_loss_diffrax(self, params, args) -> tuple[Float, Aux]:
         y, x0, u, t, _, n_trajectories = args
-
+        
         eval_trajectory = eqx.filter_vmap(
             self.model.eval_trajectory, in_axes=(0, 0, 0, None)
         )
@@ -125,6 +131,7 @@ class ParameterEstimator:
 
     def train_step(self, params: Parameter) -> tuple[Parameter, Bool]:
         params, self.state, aux = self.step(y=params, state=self.state)
+
         done, result = self.terminate(y=params, state=self.state)
         return params, done
 
