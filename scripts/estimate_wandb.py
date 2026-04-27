@@ -25,7 +25,7 @@ hyperparameters = {
     "n_epochs": 500,
     "model": "diffrax",  # flumen or diffrax
     "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
-    "parameter_loss": "RRMSE", # l1_relative, l2_relative, RRMSE
+    "parameter_loss": "RRMSE",  # l1_relative, l2_relative, RRMSE
     # "initial_parameter": [0.0814, 0.2669],  # dimension is data model dependent
     "initial_parameter": [0.0],  # dimension is data model dependent
 }
@@ -148,7 +148,7 @@ def main():
         train_loss = parameter_estimator.validate(est_params, train_data)
         val_loss = parameter_estimator.validate(est_params, val_data)
         params_loss = params_loss_fn(true_params, est_params)
-        print_losses(epoch+1, train_loss, val_loss, params_loss, est_params)
+        print_losses(epoch + 1, train_loss, val_loss, params_loss, est_params)
         est_time = time() - time_start
         wandb.log(
             {
@@ -165,7 +165,9 @@ def main():
                 f"Stopping training at Epoch {epoch + 1}, estimation took {est_time:.3f} [s]"
             )
             param_found = True if params_loss < 0.05 else False
-            print(f"estimation done in {epoch + 1} iterations, parameter found: {param_found}")
+            print(
+                f"estimation done in {epoch + 1} iterations, parameter found: {param_found}"
+            )
             print(f"final parameter error {params_loss}")
             run.summary["final_train"] = train_loss
             run.summary["final_val"] = val_loss

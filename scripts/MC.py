@@ -6,6 +6,7 @@ from indago.estimate import ParameterEstimator
 from indago.dataloader import RawNumPyDataset
 from indago.model import Dynamics_JAX, Diffrax
 from flumen_jax import Flumen
+from time import time
 from semble import (
     get_parameter_generator,
     ParameterGenerator,
@@ -29,17 +30,17 @@ import os
 import torch
 
 hyperparameters = {
-    "n_epochs": 1000,  # max number of epochs
+    "n_epochs": 30,  # max number of epochs
     "model": "flumen",  # flumen or diffrax
-    "optimizer": "GradientDescent",  # Adam, GradientDescent, BFGS
+    "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
     "parameter_loss": "l1_relative",
-    "NUMPY_KEY_SEED": 3520756,
+    "NUMPY_KEY_SEED": 3520758,
 }
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Dopri5",  # Dopri5, Dopri8, Euler
-    "dt0": 0.01,  # initial step size
+    "integrator": "Euler",  # Dopri5, Dopri8, Euler, Tsit5
+    "dt0": 0.001,  # initial step size
 }
 
 
@@ -160,8 +161,10 @@ def main():
     param_loss_list = []
     true_params_list = []
     est_params_list = []
+    time_list = []
     for i in range(wandb.config["runs"]):
         print("simulation: ", i + 1, "/", wandb.config["runs"])
+        time_start = time()
         init_params = parameter_generator.sample(param_rng)
         parameter_estimator.reset(init_params)
 
@@ -173,18 +176,21 @@ def main():
 
         est_params_list.append(est_params)
         true_params_list.append(true_params)
-
+        est_time = time() - time_start
         print("init params:", init_params, "est params:", est_params)
+        print("duration of run:", est_time)
 
         iterations.append(iter)
         param_loss = params_loss_fn(true_params, est_params)
         param_loss_list.append(param_loss)
+        time_list.append(est_time)
 
         if param_loss < 0.01:
             n_succesful_runs += 1
 
     results = {
         "iterations": iterations,
+        "time_list": time_list,
         "est_params": est_params_list,
         "true_params": true_params_list,
         "param_loss": param_loss_list,
