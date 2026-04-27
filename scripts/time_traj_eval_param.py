@@ -30,7 +30,7 @@ from semble.sequence_generators import SequenceGenerator, get_sequence_generator
 
 from indago.model import (
     ParameterisedCellTransmissionModel_Numpy,
-    ParameterisedCellTransmissionModelNonSmooth_Jax,
+    ParameterisedCellTransmissionModel_Jax,
 )
 
 plt.rcParams.update(
@@ -49,44 +49,6 @@ SCIPY_ATOL = 1e-9
 SCIPY_RTOL = 1e-9
 
 NUMPY_RNG_SEED = 73577678
-
-
-def flux_interp(x, sigma_i, q_max):
-    locs = jnp.array([0.0, sigma_i, 1.0])
-    vals = jnp.array([0.0, q_max, 0.0])
-    return jnp.interp(x, locs, vals)
-
-
-def ctm_dx(x, inv_step, u_val, sigma_i, q_max):
-    x_minus_one = jnp.hstack((u_val, x[:-1]))
-    x_plus_one = jnp.hstack((x[1:], jnp.zeros_like(u_val)))
-
-    d_prev = flux_interp(jnp.minimum(x_minus_one, sigma_i), sigma_i, q_max)
-    s_this = flux_interp(jnp.maximum(x, sigma_i), sigma_i, q_max)
-    q_prev = jnp.minimum(d_prev, s_this)
-
-    d_this = flux_interp(jnp.minimum(x, sigma_i), sigma_i, q_max)
-    s_next = flux_interp(jnp.maximum(x_plus_one, sigma_i), sigma_i, q_max)
-    q_this = jnp.minimum(d_this, s_next)
-
-    dx = inv_step * (q_prev - q_this)
-
-    return dx
-
-
-def eval_u(uvals, delta, ts):
-    return uvals[jnp.floor(ts / delta).astype(jnp.uint32)]
-
-
-def euler_scan(timestep: float, init_state, us, ctm_inv_step, param):
-    sigma, q = param
-
-    def f(x, u):
-        return x + timestep * ctm_dx(x, ctm_inv_step, u, sigma, q), x
-
-    x_last, xs = jax.lax.scan(f, init_state, us)
-
-    return jnp.concatenate((xs, jnp.expand_dims(x_last, 0)), axis=0)
 
 
 def rrmse(y_true, y_other):
@@ -205,16 +167,14 @@ def compute_times_and_errors(
     y_scipy = np.transpose(y_scipy, axes=(0, 2, 1))
 
     euler_results = []
-
+    dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     for dt in dts:
-        inv_dx = dynf_np.inv_step
         n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
         ts_euler = dt * jnp.arange(0.0, n_steps + 1)
 
         @jax.jit
         def euler_func(x, u, params):
-            us = eval_u(u, delta, ts_euler[:-1])
-            ys = euler_scan(dt, x, us, inv_dx, params)
+            ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
             return jax.vmap(
                 lambda y: jnp.interp(time_vector, ts_euler, y),
                 in_axes=1,
@@ -235,10 +195,9 @@ def compute_times_and_errors(
             }
         )
 
-    dynf = ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
     solver = diffrax.Tsit5()
     stepsize_controller = diffrax.PIDController(atol=1e-3, rtol=1e-6)
-    ode_term = diffrax.ODETerm(dynf)
+    ode_term = diffrax.ODETerm(dynf_jax)
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
     @jax.jit
@@ -399,15 +358,7 @@ def main(args):
     ax.set_xscale("log")
     ax.set_yscale("log")
 
-    # unique sorted T values
-    # T_values = sorted(times_and_errors["$T$"].unique())
-
-    # sample evenly spaced colors from viridis
-    # colors = plt.cm.viridis(np.linspace(0, 1, len(T_values)))
-
-    # map each T to a color
-    # palette = dict(zip(T_values, colors))
-    sns.scatterplot(
+    sp = sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
         y="RRMSE",
@@ -418,7 +369,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("time_traj_eval_param_nonsmooth_nointerp_t01.pdf")
+    # plt.savefig("time_traj_eval_param_2704.pdf")
     plt.show()
 
 

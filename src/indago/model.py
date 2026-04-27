@@ -12,7 +12,7 @@ import diffrax as dfx
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
-
+import jax
 
 """Diffrax (Jax/JIT friendly) implementation of semble dynamics"""
 
@@ -36,10 +36,10 @@ class Dynamics_JAX:
         return self._dx(t, x, u)
 
 
-"""Jax (Jax/JIT friendly) implementation of Param CTM model (smooth)"""
+"""Diffrax implementation of Param CTM model (smooth)"""
 
 
-class ParameterisedCellTransmissionModelSmooth_Jax(Dynamics_JAX):
+class ParameterisedCellTransmissionModelSmooth_Diffrax(Dynamics_JAX):
     def __init__(self, dynamics: ParameterisedCellTransmissionModel, delta):
         super().__init__(dynamics, delta)
         self.delta = delta
@@ -98,10 +98,10 @@ class ParameterisedCellTransmissionModelSmooth_Jax(Dynamics_JAX):
         return self._dx(t, x, u)
 
 
-"""Jax (Jax/JIT friendly) implementation of Param CTM model (nonsmooth)"""
+"""Diffrax implementation of Param CTM model (nonsmooth)"""
 
 
-class ParameterisedCellTransmissionModelNonSmooth_Jax(Dynamics_JAX):
+class ParameterisedCellTransmissionModelNonSmooth_Diffrax(Dynamics_JAX):
     def __init__(self, dynamics: ParameterisedCellTransmissionModel, delta):
         super().__init__(dynamics, delta)
         self.delta = delta
@@ -147,6 +147,66 @@ class ParameterisedCellTransmissionModelNonSmooth_Jax(Dynamics_JAX):
         u, params = args
         self._set_parameter(params)
         return self._dx(t, x, u)
+
+
+"""Jax implementation of Param CTM model, used for (manual) euler and diffrax integration"""
+
+
+class ParameterisedCellTransmissionModel_Jax:
+    def __init__(self, dynamics: ParameterisedCellTransmissionModel, delta):
+        super().__init__()
+        self.delta = delta
+        self.inv_step = dynamics.dynamics.inv_step
+        self.flux = self.flux_interp  # flux_interp / flux_nointerp
+
+    def flux_nointerp(self, x, sigma_i, q_max):
+        return jnp.minimum(
+            q_max * x / sigma_i,
+            (1 - x) * q_max / (1 - sigma_i),
+        )
+
+    def flux_interp(self, x, sigma_i, q_max):
+        locs = jnp.array([0.0, sigma_i, 1.0])
+        vals = jnp.array([0.0, q_max, 0.0])
+        return jnp.interp(x, locs, vals)
+
+    def _dx(self, x, u_val, params):
+        sigma_i, q_max = params
+        x_minus_one = jnp.hstack((u_val, x[:-1]))
+        x_plus_one = jnp.hstack((x[1:], jnp.zeros_like(u_val)))
+
+        D_i_minus_one = self.flux(
+            jnp.minimum(x_minus_one, sigma_i), sigma_i, q_max
+        )
+        S_i = self.flux(jnp.maximum(x, sigma_i), sigma_i, q_max)
+        q_i_minus_one = jnp.minimum(D_i_minus_one, S_i)
+
+        D_i = self.flux(jnp.minimum(x, sigma_i), sigma_i, q_max)
+        S_i_plus_one = self.flux(
+            jnp.maximum(x_plus_one, sigma_i), sigma_i, q_max
+        )
+        q_i = jnp.minimum(D_i, S_i_plus_one)
+
+        dx = self.inv_step * (q_i_minus_one - q_i)
+
+        return dx
+
+    # We use this call for manual euler implementation
+    def euler_scan(self, ts, dt, x, u_vals, params):
+        us = u_vals[jnp.floor(ts / self.delta).astype(jnp.uint32)]
+
+        def f(x, u):
+            return x + dt * self._dx(x, u, params), x
+
+        x_last, xs = jax.lax.scan(f, x, us)
+        return jnp.concatenate((xs, jnp.expand_dims(x_last, 0)), axis=0)
+
+    # We use this call for in diffrax eq solve
+    def __call__(self, t, x, args):
+        u, params = args
+        index = jnp.floor(t / self.delta).astype(jnp.uint32)
+        u_val = u[index]
+        return self._dx(x, u_val, params)
 
 
 """Numpy implementation of Param CTM model (nonsmooth)"""
