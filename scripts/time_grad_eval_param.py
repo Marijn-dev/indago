@@ -135,79 +135,115 @@ def compute_times_and_errors(
         return (time() - t) / (x0.shape[0] - n_warmup), y
 
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
+    dts.sort()
 
     ### First take lowest dts_0 as 'ground truth' ###
-    dts.sort()
-    dt = dts[0]
-    n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-    ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+    # dt = dts[0]
+    # n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+    # ts_euler = dt * jnp.arange(0.0, n_steps + 1)
 
-    @equinox.filter_jit
-    @equinox.filter_grad
-    def manual_euler_func(params, u, x):
-        ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-        y = ys[-1]
-        return output_func(y)
+    # @equinox.filter_jit
+    # @equinox.filter_grad
+    # def manual_euler_func(params, u, x):
+    #     ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
+    #     y = ys[-1]
+    #     return output_func(y)
 
-    t_true, g_true = warmup_and_time(x0, u, params, manual_euler_func)
-    print(f"Euler(dt={dt}): {t_true:.3e} s/traj")
+    # t_true, g_true = warmup_and_time(x0, u, params, manual_euler_func)
+    # print(f"Euler(dt={dt}): {t_true:.3e} s/traj")
 
     ### manual euler with remaining timesteps ###
-    manual_euler_results = []
-    for dt in dts[1:]:
-        n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-        ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+    # manual_euler_results = []
+    # for dt in dts[1:]:
+    #     n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+    #     ts_euler = dt * jnp.arange(0.0, n_steps + 1)
 
-        @equinox.filter_jit
-        @equinox.filter_grad
-        def manual_euler_func(params, u, x):
-            ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-            y = ys[-1]
-            return output_func(y)
+    #     @equinox.filter_jit
+    #     @equinox.filter_grad
+    #     def manual_euler_func(params, u, x):
+    #         ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
+    #         y = ys[-1]
+    #         return output_func(y)
 
-        t_manual_euler, g_manual_euler = warmup_and_time(
-            x0, u, params, manual_euler_func
-        )
-        error_euler = rrmse_param(g_true, g_manual_euler)
-        print(f"Euler(dt={dt}): {t_manual_euler:.3e} s/traj")
-        manual_euler_results.append(
-            {
-                "Method": f"Euler (dt={dt})",
-                r"$T$": time_horizon,
-                "Time per trajectory (s)": t_manual_euler,
-                "RRMSE": error_euler,
-            }
-        )
+    #     t_manual_euler, g_manual_euler = warmup_and_time(
+    #         x0, u, params, manual_euler_func
+    #     )
+    #     error_euler = rrmse_param(g_true, g_manual_euler)
+    #     print(f"Euler(dt={dt}): {t_manual_euler:.3e} s/traj")
+    #     manual_euler_results.append(
+    #         {
+    #             "Method": f"Euler (dt={dt})",
+    #             r"$T$": time_horizon,
+    #             "Time per trajectory (s)": t_manual_euler,
+    #             "RRMSE": error_euler,
+    #         }
+    #     )
 
     ode_term = diffrax.ODETerm(dynf_jax)
     time_vector = np.array([time_horizon])
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
-    ### This is euler using diffrax ###
-    # @equinox.filter_jit
-    # @equinox.filter_grad
-    # def diffrax_euler_func(params, u, x):
-    #     y = cast(
-    #         Array,
-    #         diffrax.diffeqsolve(
-    #             ode_term,
-    #             solver=diffrax.Euler(),
-    #             t0=0.0,
-    #             t1=time_horizon,
-    #             dt0=dt0,
-    #             y0=x,
-    #             args=(u, params),
-    #             saveat=ts,
-    #             stepsize_controller=diffrax.ConstantStepSize(),
-    #             max_steps=100 + int(time_horizon / dt0),
-    #         ).ys,
-    #     )
-    #     return output_func(y)
+    dt = dts[0]
 
-    # t_diffrax_euler, g_diffrax_euler = warmup_and_time(
-    #     x0, u, params, diffrax_euler_func
-    # )
-    # print(f"diffrax(Euler): {t_diffrax_euler:.3e} s/traj")
+    @equinox.filter_jit
+    @equinox.filter_grad
+    def diffrax_euler_func(params, u, x):
+        y = cast(
+            Array,
+            diffrax.diffeqsolve(
+                ode_term,
+                solver=diffrax.Euler(),
+                t0=0.0,
+                t1=time_horizon,
+                dt0=dt,
+                y0=x,
+                args=(u, params),
+                saveat=ts,
+                stepsize_controller=diffrax.ConstantStepSize(),
+                max_steps=100 + int(time_horizon / dt),
+            ).ys,
+        )
+        return output_func(y)
+
+    t_diffrax_euler, g_true = warmup_and_time(x0, u, params, diffrax_euler_func)
+
+    ### This is euler using diffrax ###
+    diffrax_euler_results = []
+    for dt in dts[1:]:
+
+        @equinox.filter_jit
+        @equinox.filter_grad
+        def diffrax_euler_func(params, u, x):
+            y = cast(
+                Array,
+                diffrax.diffeqsolve(
+                    ode_term,
+                    solver=diffrax.Euler(),
+                    t0=0.0,
+                    t1=time_horizon,
+                    dt0=dt,
+                    y0=x,
+                    args=(u, params),
+                    saveat=ts,
+                    stepsize_controller=diffrax.ConstantStepSize(),
+                    max_steps=100 + int(time_horizon / dt),
+                ).ys,
+            )
+            return output_func(y)
+
+        t_diffrax_euler, g_diffrax_euler = warmup_and_time(
+            x0, u, params, diffrax_euler_func
+        )
+        error_euler = rrmse_param(g_true, g_diffrax_euler)
+        print(f"Euler(dt={dt}): {t_diffrax_euler:.3e} s/traj")
+        diffrax_euler_results.append(
+            {
+                "Method": f"Euler (dt={dt})",
+                r"$T$": time_horizon,
+                "Time per trajectory (s)": t_diffrax_euler,
+                "RRMSE": error_euler,
+            }
+        )
 
     @equinox.filter_jit
     @equinox.filter_grad
@@ -223,9 +259,7 @@ def compute_times_and_errors(
                 y0=x,
                 args=(u, params),
                 saveat=ts,
-                stepsize_controller=diffrax.PIDController(
-                    atol=1e-12, rtol=1e-12
-                ),
+                stepsize_controller=diffrax.PIDController(atol=1e-9, rtol=1e-9),
             ).ys,
         )
         return output_func(y)
@@ -281,16 +315,16 @@ def compute_times_and_errors(
         axs[0].legend()
         plt.show()
 
-    return *manual_euler_results, tsit5_results, flumen_results
+    return *diffrax_euler_results, tsit5_results, flumen_results
 
 
 def main(args):
-    # model_path = Path(args.path)
-    import wandb
+    model_path = Path(args.path)
+    # import wandb
 
-    api = wandb.Api()
-    model_artifact = api.artifact(args.path)
-    model_path = Path(model_artifact.download())
+    # api = wandb.Api()
+    # model_artifact = api.artifact(args.path)
+    # model_path = Path(model_artifact.download())
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
@@ -384,7 +418,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("time_traj_eval_param_grad_dxdparam_2804.pdf")
+    plt.savefig("time_traj_eval_param_grad_dxdparam_diffrax_2804.pdf")
     plt.show()
 
 
