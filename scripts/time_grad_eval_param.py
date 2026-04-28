@@ -32,6 +32,18 @@ import pandas as pd
 import seaborn as sns
 import yaml
 
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "axes.labelsize": 18,
+        "axes.titlesize": 18,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 12,
+    }
+)
+
 NUMPY_RNG_SEED = 214690153
 
 
@@ -95,7 +107,7 @@ def sample_features(
 
 
 def output_func(y):
-    return jnp.sum(y)
+    return jnp.mean(y)
 
 
 def compute_times_and_errors(
