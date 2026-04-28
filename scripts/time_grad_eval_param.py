@@ -1,15 +1,25 @@
 from argparse import ArgumentParser
-from math import floor
 from pathlib import Path
 from time import time
 from typing import cast
 from indago.model import (
-    Diffrax,
-    Dynamics_JAX,
-    ParameterisedCellTransmissionModelNonSmooth_Jax,
-    ParameterisedCellTransmissionModelSmooth_Jax,
-    ParameterisedCellTransmissionModel_Numpy,
+    ParameterisedCellTransmissionModel_Jax,
 )
+from jaxtyping import Array
+from semble.dynamics import (
+    ParameterisedCellTransmissionModel,
+)
+from semble.parameter_generators import (
+    ParameterGenerator,
+    get_parameter_generator,
+)
+from semble.initial_state import (
+    InitialStateGenerator,
+    get_initial_state_generator,
+)
+from semble.sequence_generators import SequenceGenerator, get_sequence_generator
+from flumen_jax import Flumen
+
 import diffrax
 import equinox
 import jax
@@ -20,79 +30,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import yaml
-from jaxtyping import Array
-from scipy.integrate import solve_ivp
-from semble.dynamics import ParameterisedCellTransmissionModel, GreenshieldsTraffic, ParameterisedNewellDaganzoTraffic
-from semble.parameter_generators import ParameterGenerator,get_parameter_generator
-
-from semble.initial_state import (
-    InitialStateGenerator,
-    get_initial_state_generator,
-)
-from semble.sequence_generators import SequenceGenerator, get_sequence_generator
-
-from flumen_jax import Flumen
 
 NUMPY_RNG_SEED = 214690153
-### This might explain the parameter estimation taking longer since dy/dtheta might be expensive. Inspect dy/dtheta and look at gradient with time on the x axis for theta=1.92 (the saddle point) in 
-
-class GreenshieldsAdjoint:
-    def __init__(
-        self, dynamics: GreenshieldsTraffic, delta, time_horizon: float
-    ):
-        super().__init__()
-        self.delta = delta
-        self.v0 = dynamics.v0
-        self.inv_step = dynamics.inv_step
-        self.n = dynamics.n
-        self.n_control_differentials = 1 + int(floor(time_horizon / self.delta))
-
-    def __call__(self, t, y, u):
-        n_control = jnp.floor(t / self.delta).astype(jnp.uint32)
-        u_val = u[n_control, 0]
-
-        rho = y[: self.n]
-        r = y[self.n :]
-
-        q_out = self.v0 * rho * (1.0 - rho)
-        q0_in = self.v0 * u_val * (1.0 - u_val)
-        q_in = jnp.hstack((q0_in, q_out[:-1]))
-        drho = self.inv_step * (q_in - q_out)
-
-        p_out = self.v0 * (1.0 - 2.0 * rho)
-        p_in = jnp.hstack((0.0, p_out[:-1]))
-        r_in = jnp.hstack((0.0, r[:-1]))
-
-        dr = self.inv_step * (
-            jnp.tile(p_in, self.n_control_differentials) * r_in
-            - jnp.tile(p_out, self.n_control_differentials) * r
-        )
-
-        dr = dr.at[n_control * self.n].add(
-            self.inv_step * self.v0 * (1.0 - 2.0 * u_val)
-        )
-
-        return jnp.concatenate((drho, dr))
-
-
-class GreenshieldsJax:
-    def __init__(self, dynamics: GreenshieldsTraffic, delta):
-        super().__init__()
-        self.v0 = dynamics.v0
-        self.inv_step = dynamics.inv_step
-        self.delta = delta
-
-    def __call__(self, t, y, u_vec):
-        index = jnp.floor(t / self.delta).astype(jnp.uint32)
-        u_val = u_vec[index]
-        q_out = self.v0 * y * (1.0 - y)
-        q0_in = self.v0 * u_val * (1.0 - u_val)
-
-        q_in = jnp.hstack((q0_in, q_out[:-1]))
-
-        dy = self.inv_step * (q_in - q_out)
-
-        return dy
 
 
 def parse_args():
@@ -110,7 +49,7 @@ def parse_args():
         nargs="+",
         default=[20.0],
     )
-    ap.add_argument("--diffrax_dt0", type=float, default=0.01)
+    ap.add_argument("--diffrax_dt0", type=float, default=0.001)
 
     return ap.parse_args()
 
@@ -156,15 +95,21 @@ def compute_times_and_errors(
     dt0=0.01,
 ):
     def warmup_and_time(x0, u, params, func):
-        # for dx/du
+        ### for dx/du ###
         y = np.empty((u.shape[0] - n_warmup, u.shape[1], u.shape[2]))
-        # for dx/dparam
+
+        ### for dx/dparam ###
         # y = np.empty((params.shape[0] - n_warmup, params.shape[1]))
-        for x_, u_, params_ in zip(x0[:n_warmup], u[:n_warmup], params[:n_warmup]):
-            func(u_, x_,params_)
+
+        for x_, u_, params_ in zip(
+            x0[:n_warmup], u[:n_warmup], params[:n_warmup]
+        ):
+            func(u_, x_, params_)
         t = time()
-        for k, (x_, u_,params_) in enumerate(zip(x0[n_warmup:], u[n_warmup:], params[n_warmup:])):
-            y[k] = func(u_, x_,params_).block_until_ready()
+        for k, (x_, u_, params_) in enumerate(
+            zip(x0[n_warmup:], u[n_warmup:], params[n_warmup:])
+        ):
+            y[k] = func(u_, x_, params_).block_until_ready()
         return (time() - t) / (x0.shape[0] - n_warmup), y
 
     def warmup_and_time_batched(x0, u, func):
@@ -173,10 +118,24 @@ def compute_times_and_errors(
         y = func(u[n_warmup:], x0[n_warmup:])
         return (time() - t) / (x0.shape[0] - n_warmup), y
 
-    time_vector = np.array([time_horizon])
+    dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
+    n_steps = 1 + jnp.ceil(time_horizon / dt0).astype(jnp.uint32)
+    ts_euler = dt0 * jnp.arange(0.0, n_steps + 1)
 
-    dynf = ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
-    ode_term = diffrax.ODETerm(dynf)
+    @equinox.filter_jit
+    @equinox.filter_grad
+    def manual_euler_func(u, x, params):
+        ys = dynf_jax.euler_scan(ts_euler[:-1], dt0, x, u, params)
+        y = ys[-1]
+        return output_func(y)
+
+    t_manual_euler, g_manual_euler = warmup_and_time(
+        x0, u, params, manual_euler_func
+    )
+    print(f"Euler: {t_manual_euler:.3e} s/traj")
+
+    ode_term = diffrax.ODETerm(dynf_jax)
+    time_vector = np.array([time_horizon])
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
     @equinox.filter_jit
@@ -191,7 +150,7 @@ def compute_times_and_errors(
                 t1=time_horizon,
                 dt0=dt0,
                 y0=x,
-                args=(u,params),
+                args=(u, params),
                 saveat=ts,
                 stepsize_controller=diffrax.ConstantStepSize(),
                 max_steps=100 + int(time_horizon / dt0),
@@ -199,12 +158,14 @@ def compute_times_and_errors(
         )
         return output_func(y)
 
-    t_euler, g_diffrax_euler = warmup_and_time(x0, u, params,diffrax_euler_func)
-    print(f"diffrax(Euler): {t_euler:.3e} s/traj")
+    t_diffrax_euler, g_diffrax_euler = warmup_and_time(
+        x0, u, params, diffrax_euler_func
+    )
+    print(f"diffrax(Euler): {t_diffrax_euler:.3e} s/traj")
 
     @equinox.filter_jit
     @equinox.filter_grad
-    def diffrax_tsit5_func(u, x,params):
+    def diffrax_tsit5_func(u, x, params):
         y = cast(
             Array,
             diffrax.diffeqsolve(
@@ -214,18 +175,19 @@ def compute_times_and_errors(
                 t1=time_horizon,
                 dt0=dt0,
                 y0=x,
-                args=(u,params),
+                args=(u, params),
                 saveat=ts,
-                # adjoint=diffrax.BacksolveAdjoint(),
-                # stepsize_controller=diffrax.PIDController(atol=1e-6, rtol=1e-3),
-                # stepsize_controller=diffrax.ConstantStepSize(),
-                stepsize_controller=diffrax.PIDController(atol=1e-12, rtol=1e-12),
+                stepsize_controller=diffrax.PIDController(
+                    atol=1e-12, rtol=1e-12
+                ),
             ).ys,
         )
         return output_func(y)
 
-    t_tsit5, g_diffrax_tsit5 = warmup_and_time(x0, u, params,diffrax_tsit5_func)
-    print(f"diffrax(Tsit5): {t_tsit5:.3e} s/traj")
+    t_diffrax_tsit5, g_diffrax_tsit5 = warmup_and_time(
+        x0, u, params, diffrax_tsit5_func
+    )
+    print(f"diffrax(Tsit5): {t_diffrax_tsit5:.3e} s/traj")
 
     time_vector = time_vector.reshape((-1, 1))
     flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
@@ -238,53 +200,22 @@ def compute_times_and_errors(
 
     @equinox.filter_jit
     @equinox.filter_grad
-    def flumen_func(u, x,params):
+    def flumen_func(u, x, params):
         model: Flumen = jax.tree_util.tree_unflatten(model_treedef, flat_model)
         rnn_input = jnp.concatenate((u, tau_seq), axis=-1)
         y = model(x, rnn_input, tau, skips + 1, params)  # type: ignore
 
         return output_func(y)
 
-    t_flumen, g_flumen = warmup_and_time(x0, u, params,flumen_func)
+    t_flumen, g_flumen = warmup_and_time(x0, u, params, flumen_func)
     print(f"flumen: {t_flumen:.3e} s/traj")
 
-    ### This is hard to do with CTM model
-    # gs_adj = GreenshieldsAdjoint(dynamics, delta, time_horizon)
-    # gs_adj_jit = jax.jit(gs_adj)
-
-    # g_numpy = -1 * np.ones_like(g_flumen)
-
-    # for k, (x, u) in enumerate(zip(x0[n_warmup:], u[n_warmup:])):
-    #     init_cond = np.concatenate(
-    #         (x, np.zeros(gs_adj.n * gs_adj.n_control_differentials))
-    #     )
-
-    #     sol = solve_ivp(
-    #         gs_adj_jit,
-    #         t_span=(0.0, time_horizon),
-    #         y0=init_cond,
-    #         method="RK45",
-    #         t_eval=time_vector[0],
-    #         args=(u,),
-    #         atol=1e-9,
-    #         rtol=1e-9,
-    #     )
-
-    #     adjoints = sol.y[gs_adj.n :, 0]
-
-    #     adjoints = np.stack(
-    #         np.split(adjoints, gs_adj.n_control_differentials),
-    #         axis=-1,
-    #     )
-
-    #     g_numpy[k] = np.sum(adjoints, axis=0, keepdims=True).T
-
-    def error_stats(g_other):
+    def error_stats(g_true, g_other):
         g_other = g_other.squeeze()
-        g_true = g_numpy.squeeze()
+        g_true = g_true.squeeze()
 
         g_true_norm = np.linalg.norm(g_true, axis=-1)
-        error = np.linalg.norm(g_true - g_other, axis=-1) / g_true_norm
+        error = np.linalg.norm(g_true - g_other, axis=-1) / (g_true_norm + 1e12)
         mean = np.mean(error, axis=0)
         std = np.std(error, axis=0)
 
@@ -294,86 +225,33 @@ def compute_times_and_errors(
 
         return mean.item(), std.item(), mean_cossim.item()
 
-    def norm(g_one, g_second):
-        g_one_norm = np.linalg.norm(g_one,axis=-1)
-        error = np.linalg.norm(g_one-g_second, axis=-1) 
-        return np.mean(error, axis=0)
+    methods = ("Euler(diffrax)", "Tsit5", "Flumen")
+    times = (t_diffrax_euler, t_diffrax_tsit5, t_flumen)
+    norm_diffrax_euler = error_stats(g_manual_euler, g_diffrax_euler)[0]
+    norm_diffrax_tsit5 = error_stats(g_manual_euler, g_diffrax_tsit5)[0]
+    norm_flumen = error_stats(g_manual_euler, g_flumen)[0]
+    norms = (norm_diffrax_euler, norm_diffrax_tsit5, norm_flumen)
 
-    methods = ("Euler vs Tsit5", "Flumen vs Euler", "Flumen vs Tsit")
-    grads = (g_diffrax_euler, g_diffrax_tsit5, g_flumen)
-    norm_euler_flumen = norm(g_diffrax_euler,g_flumen)
-    norm_euler_tsit = np.mean(norm(g_diffrax_euler,g_diffrax_tsit5))
-    norm_euler_euler = norm(g_diffrax_euler,g_diffrax_euler)
-    norm_flumen_euler = np.mean(norm(g_flumen,g_diffrax_euler))
-    norm_flumen_tsit = np.mean(norm(g_flumen,g_diffrax_tsit5))
-    norm_flumen_flumen = norm(g_flumen,g_flumen)
-    norm_tsit_flumen = norm(g_diffrax_tsit5,g_flumen)
-    norm_tsit_euler = norm(g_diffrax_tsit5,g_diffrax_euler)
-    norm_tsit_tsit = norm(g_diffrax_tsit5,g_diffrax_tsit5)
-
-    # print("gradient u shape", g_diffrax_euler.shape)
-    # print("norm shape", norm_euler_flumen.shape)
-    # # print("Grad flumen:", g_flumen)
-    # print("Grad euler:", g_diffrax_euler)
-    # print(g_diffrax_euler.shape)
-    # if print(np.isnan(g_diffrax_euler).any()):
-    #     print("has nans") # True
-    # if print(np.isnan(g_diffrax_tsit5).any()):
-    #     print("has nans")  # True
-    # # print("Grad tsit:", g_diffrax_tsit5)
-    # has_nan_per_traj = jnp.isnan(g_diffrax_euler).any(axis=(1, 2))
-    # num_traj_with_nan = has_nan_per_traj.sum()
-    # print(num_traj_with_nan)
-    # has_nan_per_traj = jnp.isnan(g_diffrax_tsit5).any(axis=(1, 2))
-    # num_traj_with_nan = has_nan_per_traj.sum()
-    # print(num_traj_with_nan)
-    # # print(g_diffrax_tsit5)
-    # print("max values euler")
-    # print(g_diffrax_euler.max(axis=(1,2)))
-    times = (t_euler, t_flumen, t_flumen)
-    norms = (norm_euler_tsit, norm_flumen_euler, norm_flumen_tsit)
-    # results = (
-    #     {
-    #         "Method": method,
-    #         "Time horizon": time_horizon,
-    #         "Time per trajectory (s)": time,
-    #         "Relative error (mean)": mean_err,
-    #         "Relative error (std)": std_err,
-    #         "Cosine similarity (mean)": cossim,
-    #     }
-    #     for method, time, (mean_err, std_err, cossim) in zip(
-    #         methods, times, map(error_stats, results)
-    #     )
-    # )
-#     results = (
-#     {
-#         "Method": method,
-#         "Time horizon": time_horizon,
-#         "Time per trajectory (s)": time,
-#     }
-#     for method, time in zip(methods, times)
-# )
     results = (
-    {
-        "Method": method,
-        "Time horizon": time_horizon,
-        "Time per trajectory (s)": time,
-        "Norm": norm,
-    }
-    for method, time, norm in zip(
-        methods, times, norms
+        {
+            "Method": method,
+            "Time horizon": time_horizon,
+            "Time per trajectory (s)": time,
+            "Norm": norm,
+        }
+        for method, time, norm in zip(methods, times, norms)
     )
-)
-    # _, axs = plt.subplots(min(8, g_flumen.shape[0]), 1)
-    # for k, ax in enumerate(axs):
-    #     # ax.plot(g_diffrax_tsit5[k+4], label="Tsit5")
-    #     ax.plot(g_diffrax_euler[k+4], label="Euler")
-    #     ax.plot(g_flumen[k+4], label="flumen")
-    #     # ax.plot(g_numpy[k], "k--", label="Adjoint")
-    # axs[0].legend()
-    # plt.show()
 
-    return results, grads
+    _, axs = plt.subplots(min(8, g_flumen.shape[0]), 1)
+    for k, ax in enumerate(axs):
+        # ax.plot(g_diffrax_tsit5[k+4], label="Tsit5")
+        # ax.plot(g_manual_euler[k+4], label="Euler (diffrax)")
+        ax.plot(g_diffrax_euler[k + 4], label="Euler")
+        ax.plot(g_flumen[k + 4], label="flumen")
+    axs[0].legend()
+    plt.show()
+
+    return results
 
 
 def main(args):
@@ -433,7 +311,7 @@ def main(args):
             rng,
         )
 
-        results, grads = compute_times_and_errors(
+        results = compute_times_and_errors(
             model,
             time_horizon,
             n_warmup,
@@ -448,7 +326,6 @@ def main(args):
         all_results.extend(results)
 
     times_and_errors = pd.DataFrame(all_results)
-    grad_euler, grad_tsit5, grad_flumen = grads
 
     print(times_and_errors)
     _, ax = plt.subplots()
@@ -465,29 +342,6 @@ def main(args):
         palette="colorblind",
         ax=ax,
     )
-
-    # sns.scatterplot(
-    #     times_and_errors,
-    #     x="Time per trajectory (s)",
-    #     y="Relative error (mean)",
-    #     style="Method",
-    #     hue="Time horizon",
-    #     ax=ax,
-    # )
-
-
-    # _, ax = plt.subplots()
-    # ax.set_xscale("log")
-    # ax.set_yscale("log")
-
-    # sns.scatterplot(
-    #     times_and_errors,
-    #     x="Time per trajectory (s)",
-    #     y="Cosine similarity (mean)",
-    #     style="Method",
-    #     hue="Time horizon",
-    #     ax=ax,
-    # )
 
     plt.show()
 
