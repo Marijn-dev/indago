@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from time import time
 from typing import cast
+from random import uniform
 from indago.model import (
     ParameterisedCellTransmissionModel_Jax,
 )
@@ -34,6 +35,16 @@ import yaml
 NUMPY_RNG_SEED = 214690153
 
 
+def rrmse(y_true, y_other):
+    error = np.mean(
+        np.linalg.norm(y_true - y_other, axis=-1)
+        / (np.linalg.norm(y_true) + 1e-9),
+        axis=1,
+    )
+
+    return error
+
+
 def parse_args():
     ap = ArgumentParser()
     ap.add_argument("path", type=str, help="Path to model folder.")
@@ -49,7 +60,7 @@ def parse_args():
         nargs="+",
         default=[20.0],
     )
-    ap.add_argument("--diffrax_dt0", type=float, default=0.001)
+    ap.add_argument("--dts", type=float, nargs="+", default=[0.001])
 
     return ap.parse_args()
 
@@ -92,8 +103,11 @@ def compute_times_and_errors(
     u,
     params,
     delta: float,
-    dt0=0.01,
+    dts: list,
 ):
+
+    dts.sort()
+
     def warmup_and_time(x0, u, params, func):
         ### for dx/du ###
         y = np.empty((u.shape[0] - n_warmup, u.shape[1], u.shape[2]))
@@ -119,49 +133,78 @@ def compute_times_and_errors(
         return (time() - t) / (x0.shape[0] - n_warmup), y
 
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
-    n_steps = 1 + jnp.ceil(time_horizon / dt0).astype(jnp.uint32)
-    ts_euler = dt0 * jnp.arange(0.0, n_steps + 1)
+
+    ### First take lowest dts_0 as 'ground truth' ###
+    dt = dts[0]
+    n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+    ts_euler = dt * jnp.arange(0.0, n_steps + 1)
 
     @equinox.filter_jit
     @equinox.filter_grad
     def manual_euler_func(u, x, params):
-        ys = dynf_jax.euler_scan(ts_euler[:-1], dt0, x, u, params)
+        ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
         y = ys[-1]
         return output_func(y)
 
-    t_manual_euler, g_manual_euler = warmup_and_time(
-        x0, u, params, manual_euler_func
-    )
-    print(f"Euler: {t_manual_euler:.3e} s/traj")
+    t_true, g_true = warmup_and_time(x0, u, params, manual_euler_func)
+    print(f"Euler(dt={dt}): {t_true:.3e} s/traj")
+
+    ### manual euler with remaining timesteps ###
+    manual_euler_results = []
+    for dt in dts[1:]:
+        n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+        ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+
+        @equinox.filter_jit
+        @equinox.filter_grad
+        def manual_euler_func(u, x, params):
+            ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
+            y = ys[-1]
+            return output_func(y)
+
+        t_manual_euler, g_manual_euler = warmup_and_time(
+            x0, u, params, manual_euler_func
+        )
+        error_euler = rrmse(g_true, g_manual_euler)
+        print(f"Euler(dt={dt}): {t_manual_euler:.3e} s/traj")
+        manual_euler_results.append(
+            {
+                "Method": f"Euler (dt={dt})",
+                r"$T$": time_horizon,
+                "Time per trajectory (s)": t_manual_euler,
+                "RRMSE": error_euler,
+            }
+        )
 
     ode_term = diffrax.ODETerm(dynf_jax)
     time_vector = np.array([time_horizon])
+
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
-    @equinox.filter_jit
-    @equinox.filter_grad
-    def diffrax_euler_func(u, x, params):
-        y = cast(
-            Array,
-            diffrax.diffeqsolve(
-                ode_term,
-                solver=diffrax.Euler(),
-                t0=0.0,
-                t1=time_horizon,
-                dt0=dt0,
-                y0=x,
-                args=(u, params),
-                saveat=ts,
-                stepsize_controller=diffrax.ConstantStepSize(),
-                max_steps=100 + int(time_horizon / dt0),
-            ).ys,
-        )
-        return output_func(y)
+    # @equinox.filter_jit
+    # @equinox.filter_grad
+    # def diffrax_euler_func(u, x, params):
+    #     y = cast(
+    #         Array,
+    #         diffrax.diffeqsolve(
+    #             ode_term,
+    #             solver=diffrax.Euler(),
+    #             t0=0.0,
+    #             t1=time_horizon,
+    #             dt0=dt0,
+    #             y0=x,
+    #             args=(u, params),
+    #             saveat=ts,
+    #             stepsize_controller=diffrax.ConstantStepSize(),
+    #             max_steps=100 + int(time_horizon / dt0),
+    #         ).ys,
+    #     )
+    #     return output_func(y)
 
-    t_diffrax_euler, g_diffrax_euler = warmup_and_time(
-        x0, u, params, diffrax_euler_func
-    )
-    print(f"diffrax(Euler): {t_diffrax_euler:.3e} s/traj")
+    # t_diffrax_euler, g_diffrax_euler = warmup_and_time(
+    #     x0, u, params, diffrax_euler_func
+    # )
+    # print(f"diffrax(Euler): {t_diffrax_euler:.3e} s/traj")
 
     @equinox.filter_jit
     @equinox.filter_grad
@@ -173,7 +216,7 @@ def compute_times_and_errors(
                 solver=diffrax.Tsit5(),
                 t0=0.0,
                 t1=time_horizon,
-                dt0=dt0,
+                dt0=dts[0],
                 y0=x,
                 args=(u, params),
                 saveat=ts,
@@ -187,7 +230,14 @@ def compute_times_and_errors(
     t_diffrax_tsit5, g_diffrax_tsit5 = warmup_and_time(
         x0, u, params, diffrax_tsit5_func
     )
+    tsit5_error = rrmse(g_true, g_diffrax_tsit5)
     print(f"diffrax(Tsit5): {t_diffrax_tsit5:.3e} s/traj")
+    tsit5_results = {
+        "Method": "Tsit5",
+        r"$T$": time_horizon,
+        "Time per trajectory (s)": t_diffrax_tsit5,
+        "RRMSE": tsit5_error,
+    }
 
     time_vector = time_vector.reshape((-1, 1))
     flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
@@ -209,49 +259,14 @@ def compute_times_and_errors(
 
     t_flumen, g_flumen = warmup_and_time(x0, u, params, flumen_func)
     print(f"flumen: {t_flumen:.3e} s/traj")
-
-    def error_stats(g_true, g_other):
-        g_other = g_other.squeeze()
-        g_true = g_true.squeeze()
-
-        g_true_norm = np.linalg.norm(g_true, axis=-1)
-        error = np.linalg.norm(g_true - g_other, axis=-1) / (g_true_norm + 1e12)
-        mean = np.mean(error, axis=0)
-        std = np.std(error, axis=0)
-
-        norm_product = g_true_norm * np.linalg.norm(g_other, axis=-1)
-        cossim = np.einsum("ij,ij -> i", g_true, g_other) / norm_product
-        mean_cossim = np.mean(cossim, axis=0)
-
-        return mean.item(), std.item(), mean_cossim.item()
-
-    methods = ("Euler(diffrax)", "Tsit5", "Flumen")
-    times = (t_diffrax_euler, t_diffrax_tsit5, t_flumen)
-    norm_diffrax_euler = error_stats(g_manual_euler, g_diffrax_euler)[0]
-    norm_diffrax_tsit5 = error_stats(g_manual_euler, g_diffrax_tsit5)[0]
-    norm_flumen = error_stats(g_manual_euler, g_flumen)[0]
-    norms = (norm_diffrax_euler, norm_diffrax_tsit5, norm_flumen)
-
-    results = (
-        {
-            "Method": method,
-            "Time horizon": time_horizon,
-            "Time per trajectory (s)": time,
-            "Norm": norm,
-        }
-        for method, time, norm in zip(methods, times, norms)
-    )
-
-    _, axs = plt.subplots(min(8, g_flumen.shape[0]), 1)
-    for k, ax in enumerate(axs):
-        # ax.plot(g_diffrax_tsit5[k+4], label="Tsit5")
-        # ax.plot(g_manual_euler[k+4], label="Euler (diffrax)")
-        ax.plot(g_diffrax_euler[k + 4], label="Euler")
-        ax.plot(g_flumen[k + 4], label="flumen")
-    axs[0].legend()
-    plt.show()
-
-    return results
+    error_flumen = rrmse(g_true, g_flumen)
+    flumen_results = {
+        "Method": "Flumen",
+        r"$T$": time_horizon,
+        "Time per trajectory (s)": t_flumen,
+        "RRMSE": error_flumen,
+    }
+    return *manual_euler_results, tsit5_results, flumen_results
 
 
 def main(args):
@@ -320,30 +335,60 @@ def main(args):
             u,
             params,
             delta,
-            args.diffrax_dt0,
+            args.dts,
         )
 
         all_results.extend(results)
 
-    times_and_errors = pd.DataFrame(all_results)
+    times_and_errors = (
+        pd.DataFrame(all_results).explode("RRMSE").reset_index(drop=True)
+    )
+
+    # get true times
+    times = times_and_errors["Time per trajectory (s)"].unique()
+
+    # jitter times to make it look nicer
+    times_and_errors["Time per trajectory (s)"] = times_and_errors[
+        "Time per trajectory (s)"
+    ].apply(lambda x: x * (1 + uniform(-0.1, 0.1)))
 
     print(times_and_errors)
+
     _, ax = plt.subplots()
     ax.set_xscale("log")
     ax.set_yscale("log")
 
-    ## norm plot
-    sns.scatterplot(
-        data=times_and_errors,
+    sp = sns.scatterplot(
+        times_and_errors,
         x="Time per trajectory (s)",
-        y="Norm",
-        style="Method",
-        hue="Time horizon",
+        y="RRMSE",
+        hue="Method",
         palette="colorblind",
         ax=ax,
     )
-
+    for t in times:
+        ax.axvline(x=t, alpha=0.2)
+    plt.tight_layout()  # helps before saving
+    plt.savefig("time_traj_eval_param_grad_dxdu_2804.pdf")
     plt.show()
+
+    # print(times_and_errors)
+    # _, ax = plt.subplots()
+    # ax.set_xscale("log")
+    # ax.set_yscale("log")
+
+    # ## norm plot
+    # sns.scatterplot(
+    #     data=times_and_errors,
+    #     x="Time per trajectory (s)",
+    #     y="Norm",
+    #     style="Method",
+    #     hue="Time horizon",
+    #     palette="colorblind",
+    #     ax=ax,
+    # )
+
+    # plt.show()
 
 
 if __name__ == "__main__":
