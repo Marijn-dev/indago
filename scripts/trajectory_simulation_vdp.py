@@ -198,11 +198,8 @@ def main():
                     ax[0].legend()
                 ax_.set_ylabel(f"$x_{k + 1}$")
 
-        ax[-1].step(
-            np.arange(0.0, time_horizon, delta),
-            u[trajectory, :-1],
-            where="post",
-        )
+        t_u = np.linspace(0.0, time_horizon, len(u[trajectory]))
+        ax[-1].step(t_u, u[trajectory].squeeze(), where="post")
         ax[-1].set_xlabel("$t$")
         ax[0].set_title(f"$\\theta = {params[trajectory].item()}$")
 
