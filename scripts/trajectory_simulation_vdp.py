@@ -91,12 +91,6 @@ def compute_trajectories(
         for k, (x_, u_, params_) in enumerate(zip(x0, u, params)):
             y[k] = func(x_, u_, params_)
 
-    # def flumen_compute(x0, u, params, y, func):
-    #     for k, (x_, u_, params_) in enumerate(
-    #         zip(x0, u, params)
-    #     ):
-    #         y[k] = func(x_, u_, params_).block_until_ready()
-
     time_vector = np.linspace(0.0, time_horizon, n_time_samples)
     dynf_np = ParameterisedVanDerPol_Numpy(VanDerPolParameterised, delta)
 
