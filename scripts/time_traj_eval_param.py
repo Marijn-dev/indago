@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
-from time import time
 from random import uniform
+from time import time
 
 import diffrax
 import equinox
@@ -29,8 +29,8 @@ from semble.parameter_generators import (
 from semble.sequence_generators import SequenceGenerator, get_sequence_generator
 
 from indago.model import (
-    ParameterisedCellTransmissionModel_Numpy,
     ParameterisedCellTransmissionModel_Jax,
+    ParameterisedCellTransmissionModel_Numpy,
 )
 
 plt.rcParams.update(
@@ -47,7 +47,7 @@ plt.rcParams.update(
 SCIPY_ATOL = 1e-9
 SCIPY_RTOL = 1e-9
 
-NUMPY_RNG_SEED = 73577678
+NUMPY_RNG_SEED = 6003550914
 
 
 def rrmse(y_true, y_other):
@@ -173,23 +173,7 @@ def compute_times_and_errors(
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
     for dt in dts:
-        ### Custom euler
-        # n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-        # ts_euler = dt * jnp.arange(0.0, n_steps + 1)
 
-        # @jax.jit
-        # def euler_func(x, u, params):
-        #     ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-        #     return jax.vmap(
-        #         lambda y: jnp.interp(time_vector, ts_euler, y),
-        #         in_axes=1,
-        #         out_axes=1,
-        #     )(ys)
-
-        # y_euler = np.empty_like(y_scipy)
-        # t_euler = warmup_and_time(x0, u, params, y_euler, euler_func)
-
-        ### Diffrax euler
         @jax.jit
         def euler_func(x, u, params):
             return diffrax.diffeqsolve(
@@ -202,7 +186,7 @@ def compute_times_and_errors(
                 args=(u, params),
                 saveat=ts,
                 stepsize_controller=stepsize_controller,
-                max_steps=None,
+                max_steps=100 + int(time_horizon / dt),
             ).ys
 
         y_euler = np.empty_like(y_scipy)
@@ -217,8 +201,6 @@ def compute_times_and_errors(
             }
         )
 
-    print("trying the tsit5")
-
     @jax.jit
     def diffrax_tsit5_func(x, u, params):
         return diffrax.diffeqsolve(
@@ -230,7 +212,7 @@ def compute_times_and_errors(
             y0=x,
             args=(u, params),
             saveat=ts,
-            stepsize_controller=diffrax.PIDController(atol=1e-9, rtol=1e-9),
+            stepsize_controller=diffrax.PIDController(atol=1e-6, rtol=1e-9),
         ).ys
 
     y_diffrax_tsit5 = np.empty_like(y_scipy)
@@ -376,7 +358,7 @@ def main(args):
     ax.set_xscale("log")
     ax.set_yscale("log")
 
-    sp = sns.scatterplot(
+    sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
         y="RRMSE",
@@ -387,7 +369,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("time_traj_eval_param_diffrax_2804.pdf")
+    plt.savefig("traj_timings.pdf")
     plt.show()
 
 

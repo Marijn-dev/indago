@@ -44,7 +44,7 @@ plt.rcParams.update(
     }
 )
 
-NUMPY_RNG_SEED = 214690153
+NUMPY_RNG_SEED = 224691153
 
 
 def rrmse_u(y_true, y_other):
@@ -149,48 +149,6 @@ def compute_times_and_errors(
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     dts.sort()
 
-    ### First take lowest dts_0 as 'ground truth' ###
-    # dt = dts[0]
-    # n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-    # ts_euler = dt * jnp.arange(0.0, n_steps + 1)
-
-    # @equinox.filter_jit
-    # @equinox.filter_grad
-    # def manual_euler_func(params, u, x):
-    #     ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-    #     y = ys[-1]
-    #     return output_func(y)
-
-    # t_true, g_true = warmup_and_time(x0, u, params, manual_euler_func)
-    # print(f"Euler(dt={dt}): {t_true:.3e} s/traj")
-
-    ### manual euler with remaining timesteps ###
-    # manual_euler_results = []
-    # for dt in dts[1:]:
-    #     n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-    #     ts_euler = dt * jnp.arange(0.0, n_steps + 1)
-
-    #     @equinox.filter_jit
-    #     @equinox.filter_grad
-    #     def manual_euler_func(params, u, x):
-    #         ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-    #         y = ys[-1]
-    #         return output_func(y)
-
-    #     t_manual_euler, g_manual_euler = warmup_and_time(
-    #         x0, u, params, manual_euler_func
-    #     )
-    #     error_euler = rrmse_param(g_true, g_manual_euler)
-    #     print(f"Euler(dt={dt}): {t_manual_euler:.3e} s/traj")
-    #     manual_euler_results.append(
-    #         {
-    #             "Method": f"Euler (dt={dt})",
-    #             r"$T$": time_horizon,
-    #             "Time per trajectory (s)": t_manual_euler,
-    #             "RRMSE": error_euler,
-    #         }
-    #     )
-
     ode_term = diffrax.ODETerm(dynf_jax)
     time_vector = np.array([time_horizon])
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
@@ -219,7 +177,6 @@ def compute_times_and_errors(
 
     t_diffrax_euler, g_true = warmup_and_time(x0, u, params, diffrax_euler_func)
 
-    ### This is euler using diffrax ###
     diffrax_euler_results = []
     for dt in dts[1:]:
 
@@ -316,8 +273,8 @@ def compute_times_and_errors(
         "RRMSE": error_flumen,
     }
 
-    PLOT = False
-    if PLOT:
+    PLOT_GRADIENTS_FLAG = False
+    if PLOT_GRADIENTS_FLAG:
         _, axs = plt.subplots(min(8, g_flumen.shape[0]), 1)
         for k, ax in enumerate(axs):
             ax.plot(g_diffrax_tsit5[k + 4], label="Tsit5")
@@ -362,6 +319,14 @@ def main(args):
         )
     else:
         init_state_gen = dynamics.default_initial_state()
+
+    # Make sure velocity is upper bounded for Euler's method.
+    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["high"] = (
+        0.9
+    )
+    ds["dynamics"]["args"]["parameter_generator"]["args"][0]["args"]["low"] = (
+        0.1
+    )
 
     par_gen = get_parameter_generator(
         ds["dynamics"]["args"]["parameter_generator"]["name"],
@@ -419,7 +384,7 @@ def main(args):
     ax.set_xscale("log")
     ax.set_yscale("log")
 
-    sp = sns.scatterplot(
+    sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
         y="RRMSE",
@@ -430,7 +395,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("time_traj_eval_param_grad_dxdparam_diffrax_2804.pdf")
+    plt.savefig("grad_timings.pdf")
     plt.show()
 
 
