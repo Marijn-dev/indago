@@ -1,0 +1,246 @@
+from pathlib import Path
+
+import os
+import equinox
+import jax
+import jax.numpy as jnp
+import jax.random as jrd
+import matplotlib.pyplot as plt
+import numpy as np
+import yaml
+from flumen_jax import Flumen
+from scipy.integrate import solve_ivp
+from semble.dynamics import (
+    ParameterisedCellTransmissionModel,
+)
+from semble.initial_state import (
+    InitialStateGenerator,
+    get_initial_state_generator,
+)
+
+from semble.sequence_generators import SequenceGenerator, get_sequence_generator
+
+from indago.model import (
+    ParameterisedCellTransmissionModel_Numpy,
+)
+
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "axes.labelsize": 18,
+        "axes.titlesize": 18,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 12,
+    }
+)
+
+NUMPY_RNG_SEED = 6003550917
+SCIPY_ATOL = 1e-9
+SCIPY_RTOL = 1e-9
+
+
+def solve_flumen_traj(flat_model, model_treedef, t, x0, u, delta, params):
+    model: Flumen = jax.tree_util.tree_unflatten(model_treedef, flat_model)
+    skips = jnp.floor(t / delta).astype(jnp.uint32)
+    tau = (t - delta * skips) / delta
+
+    return model.eval_trajectory(x0, u, tau, skips.squeeze(), params)
+
+
+def sample_features(
+    dynamics: ParameterisedCellTransmissionModel,
+    init_state_gen: InitialStateGenerator,
+    seq_gen: SequenceGenerator,
+    n_samples: int,
+    time_horizon: float,
+    delta: float,
+    rng,
+):
+    control_len = 1 + int(np.ceil(time_horizon / delta))
+
+    x0 = np.empty((n_samples, dynamics.n), dtype=np.float64)
+    u = np.empty((n_samples, control_len, dynamics.m), dtype=np.float64)
+
+    params = np.array(
+        [[0.20, 0.275], [0.4, 0.275], [0.6, 0.275], [0.8, 0.275]],
+        dtype=np.float32,
+    )
+
+    for k in range(n_samples):
+        x0[k] = init_state_gen.sample(rng).astype(np.float64)
+        u[k] = seq_gen.sample(
+            time_range=(0, time_horizon), delta=delta, rng=rng
+        ).astype(np.float32)
+
+    return x0, u, params
+
+
+def compute_trajectories(
+    flumen: Flumen,
+    time_horizon: float,
+    n_time_samples: int,
+    dynamics: ParameterisedCellTransmissionModel,
+    x0,
+    u,
+    params,
+    delta: float,
+):
+
+    def compute_trajectories(x0, u, params, y, func):
+        for k, (x_, u_, params_) in enumerate(zip(x0, u, params)):
+            y[k] = func(x_, u_, params_)
+
+    time_vector = np.linspace(0.0, time_horizon, n_time_samples)
+    dynf_np = ParameterisedCellTransmissionModel_Numpy(dynamics, delta)
+
+    def scipy_func(x, u, params):
+        return solve_ivp(
+            dynf_np,
+            (0.0, time_horizon),
+            x,
+            t_eval=time_vector,
+            args=(u, params),
+            method="RK45",
+            atol=SCIPY_ATOL,
+            rtol=SCIPY_RTOL,
+        ).y
+
+    y_scipy = np.empty((x0.shape[0], dynamics.n, len(time_vector)))
+    compute_trajectories(x0, u, params, y_scipy, scipy_func)
+    y_scipy = np.transpose(y_scipy, axes=(0, 2, 1))
+
+    y_flumen = np.empty_like(y_scipy)
+    time_vector = time_vector.reshape((-1, 1))
+    flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
+
+    solve_flumen = solve_flumen_traj
+
+    @jax.jit
+    def flumen_func(x, u, params):
+        return solve_flumen(
+            flat_model,
+            model_treedef,
+            time_vector,
+            x,
+            u,
+            delta,
+            params,
+        )
+
+    compute_trajectories(x0, u, params, y_flumen, flumen_func)
+    return time_vector, y_scipy, y_flumen, dynf_np
+
+
+def main():
+    path = "models_local_CTM/2704/"
+    model_path = Path(path)
+
+    with open(model_path / "metadata.yaml", "r") as f:
+        metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+
+    like_model = equinox.filter_eval_shape(
+        Flumen, **metadata["args"], key=jrd.key(0)
+    )
+    model: Flumen = equinox.tree_deserialise_leaves(
+        model_path / "leaves.eqx", like_model
+    )
+
+    ds = metadata["data_settings"]
+    dynamics = ParameterisedCellTransmissionModel(**ds["dynamics"]["args"])
+
+    seq_gen = get_sequence_generator(
+        ds["sequence_generator"]["name"],
+        ds["sequence_generator"]["args"],
+    )
+
+    if "initial_state_generator" in ds:
+        init_state_gen = get_initial_state_generator(
+            ds["initial_state_generator"]["name"],
+            ds["initial_state_generator"]["args"],
+        )
+    else:
+        init_state_gen = dynamics.default_initial_state()
+
+    delta = metadata["data_settings"]["control_delta"]
+    rng = np.random.default_rng(seed=NUMPY_RNG_SEED)
+    time_horizon = metadata["data_args"]["time_horizon"]
+
+    n_trajectories = 4
+    x0, u, params = sample_features(
+        dynamics,
+        init_state_gen,
+        seq_gen,
+        n_trajectories,
+        time_horizon,
+        delta,
+        rng,
+    )
+
+    n_time_samples = 200
+    t, y_true, y_pred, dynf_np = compute_trajectories(
+        model, time_horizon, n_time_samples, dynamics, x0, u, params, delta
+    )
+
+    save_dir = "ctm_trajectories"
+    os.makedirs(save_dir, exist_ok=True)  # creates folder if it doesn't exist
+    xx = dynamics.get_space_axis()
+    for trajectory in range(0, n_trajectories):
+        fig, ax = plt.subplots(4, 1, sharex=False, constrained_layout=True)
+        for k, ax_ in enumerate(ax[: y_true.shape[-1]]):
+            ax[0].set_title("True state")
+            ax[1].set_title("Prediction")
+            ax[0].set_ylabel(r"$x$")
+            ax[1].set_ylabel(r"$x$")
+            ax[0].set_xlabel(r"$t$")
+            ax[1].set_xlabel(r"$t$")
+
+            # 1. Plot the meshes
+            mesh0 = ax[0].pcolormesh(
+                t.squeeze(),
+                xx,
+                y_true[trajectory].T,
+                vmin=y_true.min(),
+                vmax=y_true.max(),
+                rasterized=True,
+            )
+            mesh1 = ax[1].pcolormesh(
+                t.squeeze(),
+                xx,
+                y_pred[trajectory].T,
+                vmin=y_true.min(),
+                vmax=y_true.max(),
+                rasterized=True,
+            )
+
+        cbar = fig.colorbar(mesh0, ax=ax[:2], location="right")
+        cbar.set_label(r"$\rho(x,t)$")
+
+        ax[-2].step(
+            np.arange(0.0, time_horizon, delta),
+            u[trajectory, :-1],
+            where="post",
+        )
+        ax[-2].set_xlabel("$t$")
+        ax[-2].set_ylabel("$u$")
+
+        parameter = params[trajectory]
+
+        # these are sample rho values to visualize the flux function generated by the parameters
+        rho = np.linspace(0, 1, 100)
+        flux = dynf_np.flux(rho)
+        ax[-1].plot(rho, flux)
+        ax[-1].set_title(rf"$\theta=({parameter[0]:.2f},{parameter[1]:.2f})$")
+        ax[-1].set_xlabel(r"$\rho$")
+        ax[-1].set_ylabel("Q")
+
+        # fig.tight_layout()
+        # fig.subplots_adjust(hspace=0.5)
+        plt.setp([a.get_xticklabels() for a in fig.axes[:-1]], visible=False)
+        plt.savefig(f"ctm_trajectories/trajectory_{trajectory}.pdf")
+        plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()
