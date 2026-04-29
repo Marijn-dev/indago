@@ -23,18 +23,21 @@ import jax.numpy as jnp
 
 hyperparameters = {
     "n_epochs": 500,
-    "model": "diffrax",  # flumen or diffrax
-    "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
+    "model": "diffrax",  # flumen, diffrax, jax
+    "optimizer": "GradientDescent",  # Adam, GradientDescent, BFGS
     "parameter_loss": "RRMSE",  # l1_relative, l2_relative, RRMSE
-    # "initial_parameter": [0.0814, 0.2669],  # dimension is data model dependent
-    "initial_parameter": [0.0],  # dimension is data model dependent
+    "initial_parameter": [0.214, 0.2669],  # dimension is data model dependent
+    # "initial_parameter": [0.0],  # dimension is data model dependent
 }
 
 # only used when model is diffrax
 settings_diffrax = {
-    "integrator": "Tsit5",  # Dopri5, Dopri8, Euler, Tsit5
-    "dt0": 0.01,  # initial step size
+    "integrator": "Euler",  # Dopri5, Dopri8, Euler, Tsit5
+    "dt0": 0.001,  # initial step size
 }
+
+# only used when model is jax
+settings_jax = {"dt": 0.001}
 
 
 def parse_args():
@@ -83,6 +86,13 @@ def main():
     elif hyperparameters["model"] == "diffrax":
         dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
         hyperparameters.update(settings_diffrax)
+        model = return_model(
+            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
+        )
+
+    elif hyperparameters["model"] == "jax":
+        dynamics_jax = return_dynamics_jax(data["settings"])
+        hyperparameters.update(settings_jax)
         model = return_model(
             hyperparameters["model"], dynamics_jax, None, None, hyperparameters
         )

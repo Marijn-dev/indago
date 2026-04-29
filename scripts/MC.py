@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from indago.estimate import ParameterEstimator
 from indago.dataloader import RawNumPyDataset
-from indago.model import Dynamics_JAX, Diffrax
+from indago.model import Dynamics_JAX, DiffraxModel
 from flumen_jax import Flumen
 from time import time
 from semble import (
@@ -114,7 +114,7 @@ def main():
     elif hyperparameters["model"] == "diffrax":
         dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
         hyperparameters.update(settings_diffrax)
-        model: Diffrax = return_model(
+        model: DiffraxModel = return_model(
             hyperparameters["model"], dynamics_jax, None, None, hyperparameters
         )
 

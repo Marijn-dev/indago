@@ -1,9 +1,10 @@
 from semble import Dynamics, get_dynamics
 from .estimate import L1_relative, L2_relative, RRMSE
 from .model import (
-    Diffrax,
+    DiffraxModel,
     Dynamics_JAX,
-    ParameterisedCellTransmissionModelNonSmooth_Jax,
+    ParameterisedCellTransmissionModel_Jax,
+    JaxModel,
 )
 from flumen_jax import Flumen
 from jax import random as jrd
@@ -27,8 +28,8 @@ def return_dynamics_jax(data_settings):
     if which == "VanDerPolParameterised":
         return Dynamics_JAX(dynamics, delta)
     elif which == "ParameterisedCellTransmissionModel":
-        # return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
-        return ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
+        # return ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
+        return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     else:
         print(f"Data model {which} not implemented")
 
@@ -51,8 +52,8 @@ def return_model(
     dynamics_jax: Dynamics_JAX,
     metadata=None,
     model_path=None,
-    diffrax_settings=None,
-) -> Flumen | Diffrax:
+    settings=None,
+) -> Flumen | DiffraxModel | JaxModel:
     if which == "flumen":
         model: Flumen = eqx.filter_eval_shape(
             Flumen, **metadata["args"], key=jrd.key(0)
@@ -63,8 +64,11 @@ def return_model(
         )
 
     elif which == "diffrax":
-        integrator = return_integrator(diffrax_settings["integrator"])
-        model = Diffrax(dynamics_jax, integrator, diffrax_settings["dt0"])
+        integrator = return_integrator(settings["integrator"])
+        model = DiffraxModel(dynamics_jax, integrator, settings["dt0"])
+
+    elif which == "jax":
+        model = JaxModel(dynamics_jax, settings["dt"])
 
     else:
         raise ValueError(f"Unknown model {which}.")

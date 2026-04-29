@@ -1,13 +1,11 @@
+from math import floor
 from semble import Dynamics
 from .typing import State
 from jaxtyping import Float
 from semble.dynamics import (
     ParameterisedCellTransmissionModel,
-    ParameterisedNewellDaganzoTraffic,
 )
-from math import floor
 
-# from numpy.typing import Arraylike, NDArray
 import diffrax as dfx
 import jax.numpy as jnp
 import equinox as eqx
@@ -272,7 +270,8 @@ class ParameterisedCellTransmissionModel_Numpy:
         return self._dx(t, y, u)
 
 
-class Diffrax:
+### Used for parameter estimation with diffrax solvers ###
+class DiffraxModel:
     def __init__(
         self,
         dynamics: Dynamics_JAX,
@@ -298,14 +297,31 @@ class Diffrax:
             y0=x0,
             args=(u, params),
             saveat=dfx.SaveAt(ts=t_samples),
-            # adjoint=dfx.DirectAdjoint(),
-            # adjoint=dfx.BacksolveAdjoint(),
-            # adjoint=dfx.RecursiveCheckpointAdjoint(),
-            # stepsize_controller=dfx.PIDController(atol=1e-3, rtol=1e-6),
             stepsize_controller=dfx.ConstantStepSize(),
-            # stepsize_controller=dfx.PIDController(atol=1e-2, rtol=1e-2),
-            max_steps=1000000000,  # default = 4096
+            max_steps=10000,  # default = 4096
         )
-        # print(solution.adjoint)
 
         return solution.ys
+
+
+### Used for parameter estimation with manual euler ###
+class JaxModel:
+    def __init__(self, dynamics, dt):
+        self._dynamics = dynamics
+        self._dt = dt
+        time_horizon = 10
+        n_steps = 1 + jnp.ceil(time_horizon / self._dt).astype(jnp.uint32)
+        self.ts_euler = self._dt * jnp.arange(0.0, n_steps + 1)
+
+    @eqx.filter_jit
+    def eval_trajectory(self, x0, u, t_samples, params):
+        t_samples = t_samples.reshape(-1)  # [seq_len, 1] -> [seq_len]
+        # time_horizon = t_samples[-1]
+        ys = self._dynamics.euler_scan(
+            self.ts_euler[:-1], self._dt, x0, u, params
+        )
+        return jax.vmap(
+            lambda y: jnp.interp(t_samples, self.ts_euler, y),
+            in_axes=1,
+            out_axes=1,
+        )(ys)
