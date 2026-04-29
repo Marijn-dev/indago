@@ -4,6 +4,7 @@ from .typing import State
 from jaxtyping import Float
 from semble.dynamics import (
     ParameterisedCellTransmissionModel,
+    VanDerPolParameterised,
 )
 
 import diffrax as dfx
@@ -268,6 +269,32 @@ class ParameterisedCellTransmissionModel_Numpy:
     def __call__(self, t, y, u, params):
         self._set_parameter(params)
         return self._dx(t, y, u)
+
+
+class ParameterisedVanDerPol_Numpy:
+    def __init__(self, dynamics: VanDerPolParameterised, delta):
+        super().__init__()
+        self.dynamics = dynamics
+        self.delta = delta
+
+    def _set_parameter(self, parameter):
+        self.damping = parameter[0]
+
+    def _dx(self, t, x, u):
+        index = int(floor(t / self.delta))
+        u_val = u[index]
+        p, v = x
+
+        dp = v
+        dv = (
+            -p + self.damping * (1 - p**2) * v + u_val[0]
+        ) 
+
+        return (dp, dv)
+
+    def __call__(self, t, x, u, params):
+        self._set_parameter(params)
+        return self._dx(t, x, u)
 
 
 ### Used for parameter estimation with diffrax solvers ###
