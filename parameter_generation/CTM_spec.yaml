@@ -3,8 +3,8 @@ args:
   # location 1
   - name: Uniform
     args:
-      low: 0.0
-      high: 1.0
+      low: 0.1
+      high: 0.9
 
   # value 1
   - name: Uniform
