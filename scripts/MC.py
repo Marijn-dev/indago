@@ -100,9 +100,10 @@ def main():
 
     if hyperparameters["model"] == "flumen":
         assert args.model_path, "no model path given"
-        api = wandb.Api()
-        model_artifact = api.artifact(args.model_path)
-        model_path = Path(model_artifact.download())
+        # api = wandb.Api()
+        # model_artifact = api.artifact(args.model_path)
+        # model_path = Path(model_artifact.download())
+        model_path = Path(args.model_path)
 
         with open(model_path / "metadata.yaml", "r") as f:
             metadata: dict = yaml.load(f, Loader=yaml.FullLoader)

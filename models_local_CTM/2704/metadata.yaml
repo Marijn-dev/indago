@@ -1,0 +1,53 @@
+args:
+  control_dim: 1
+  decoder_depth: 3
+  decoder_hsz: 128
+  encoder_depth: 4
+  encoder_hsz: 128
+  feature_dim: 128
+  output_dim: 200
+  parameter_dim: 2
+  state_dim: 200
+  use_parameter: true
+data_args:
+  data_split:
+  - 20
+  - 20
+  n_samples: 100
+  n_trajectories: 5000
+  noise_seed: null
+  noise_std: 0.0
+  output_name: pCTM_N5000
+  settings: data_generation/pCTM.yaml
+  time_horizon: 10.0
+data_path: /cephyr/users/marijn/Alvis/Source/flumen-jax/data/pCTM_N5000.pkl
+data_settings:
+  control_delta: 1.0
+  dynamics:
+    args:
+      dx: 0.01
+      n: 200
+      parameter_generator:
+        args:
+        - args:
+            high: 1.0
+            low: 0.0
+          name: Uniform
+        - args:
+            high: 0.3
+            low: 0.2
+          name: Uniform
+        name: Product
+    name: ParameterisedCellTransmissionModel
+  initial_state_generator:
+    args:
+      n_cells: 200
+      n_sections: 8
+    name: GreenshieldsInitialState
+  sequence_generator:
+    args:
+      max: 1.0
+      min: 0.0
+      period: 1
+    name: UniformSqWave
+framework: equinox
