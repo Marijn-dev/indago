@@ -369,6 +369,7 @@ def main(args):
     times_and_errors = (
         pd.DataFrame(all_results).explode("RRMSE").reset_index(drop=True)
     )
+    times_and_errors.to_pickle("grad_timings.pkl")
 
     # get true times
     times = times_and_errors["Time per trajectory (s)"].unique()
@@ -379,7 +380,6 @@ def main(args):
     ].apply(lambda x: x * (1 + uniform(-0.1, 0.1)))
 
     print(times_and_errors)
-    times_and_errors.to_pickle("grad_timings.pkl")
     return
     _, ax = plt.subplots()
     ax.set_xscale("log")
