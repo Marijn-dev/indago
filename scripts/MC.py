@@ -33,7 +33,7 @@ hyperparameters = {
     "n_epochs": 30,  # max number of epochs
     "model": "flumen",  # flumen, diffrax, jax
     "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
-    "parameter_loss": "l1_relative",
+    "parameter_loss": "RRMSE",
     "NUMPY_KEY_SEED": 3520758,
 }
 
@@ -44,7 +44,7 @@ settings_diffrax = {
 }
 
 # only used when model is jax
-settings_jax = {"dt": 0.001}
+settings_jax = {"dt": 0.002}
 
 
 def parse_args():
@@ -190,7 +190,6 @@ def main():
         est_time = time() - time_start
         print("init params:", init_params, "est params:", est_params)
         print("duration of run:", est_time)
-
         iterations.append(iter)
         param_loss = params_loss_fn(true_params, est_params)
         param_loss_list.append(param_loss)

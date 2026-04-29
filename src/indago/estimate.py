@@ -21,13 +21,9 @@ def L2_relative(params_true: Parameter, params_est: Parameter) -> Float:
     return diff_norm / (true_norm + 1e-8)
 
 
-def RRMSE(params_true: Parameter, params_est: Parameter) -> Float:
-    MSE = jnp.mean((params_est - params_true) ** 2)
-    RMSE = jnp.sqrt(MSE)
-    norm_true = jnp.sqrt(jnp.mean((params_true**2)))
-    RRMSE = RMSE / norm_true
-    return RRMSE
-
+def RRMSE_param(y_true, y_other):
+    error = jnp.linalg.norm(y_true - y_other, axis=-1) / jnp.linalg.norm(y_true)
+    return jnp.mean(error).item()
 
 class ParameterEstimator:
     def __init__(
@@ -132,10 +128,6 @@ class ParameterEstimator:
 
         aux = None
         return loss_val, aux
-
-    # @eqx.filter_jit
-    # def _compute_loss_jax(self,params,args) -> tuple[Float, aux]:
-    #     y, x0, u, t, _, n_trajectories = args
 
     def train_step(self, params: Parameter) -> tuple[Parameter, Bool]:
         params, self.state, aux = self.step(y=params, state=self.state)

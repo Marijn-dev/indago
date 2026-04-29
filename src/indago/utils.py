@@ -1,5 +1,5 @@
 from semble import Dynamics, get_dynamics
-from .estimate import L1_relative, L2_relative, RRMSE
+from .estimate import L1_relative, L2_relative, RRMSE_param
 from .model import (
     DiffraxModel,
     Dynamics_JAX,
@@ -119,7 +119,7 @@ def get_parameter_loss(which: str):
     elif which == "l2_relative":
         return L2_relative
     elif which == "RRMSE":
-        return RRMSE
+        return RRMSE_param
     else:
         raise ValueError(f"Unknown parameter loss function {which}.")
 
