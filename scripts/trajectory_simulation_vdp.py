@@ -194,7 +194,7 @@ def main():
         fig, ax = plt.subplots(3, 1, sharex=True)
         for k, ax_ in enumerate(ax[: y_true.shape[-1]]):
             ax_.plot(
-                t, y_pred[trajectory, :, k], c="orange", label="Model output"
+                t, y_pred[trajectory, :, k], c="orange", label="Prediction"
             )
             ax_.plot(t, y_true[trajectory, :, k], "b--", label="True state")
 
