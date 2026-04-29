@@ -31,7 +31,7 @@ import torch
 
 hyperparameters = {
     "n_epochs": 30,  # max number of epochs
-    "model": "flumen",  # flumen or diffrax
+    "model": "flumen",  # flumen, diffrax, jax
     "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
     "parameter_loss": "l1_relative",
     "NUMPY_KEY_SEED": 3520758,
@@ -40,8 +40,11 @@ hyperparameters = {
 # only used when model is diffrax
 settings_diffrax = {
     "integrator": "Euler",  # Dopri5, Dopri8, Euler, Tsit5
-    "dt0": 0.001,  # initial step size
+    "dt0": 0.002,  # initial step size
 }
+
+# only used when model is jax
+settings_jax = {"dt": 0.001}
 
 
 def parse_args():
@@ -115,6 +118,13 @@ def main():
         dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
         hyperparameters.update(settings_diffrax)
         model: DiffraxModel = return_model(
+            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
+        )
+
+    elif hyperparameters["model"] == "jax":
+        dynamics_jax = return_dynamics_jax(data["settings"])
+        hyperparameters.update(settings_jax)
+        model = return_model(
             hyperparameters["model"], dynamics_jax, None, None, hyperparameters
         )
 
