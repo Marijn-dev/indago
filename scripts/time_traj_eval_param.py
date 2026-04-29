@@ -44,7 +44,6 @@ plt.rcParams.update(
         "legend.fontsize": 12,
     }
 )
-
 SCIPY_ATOL = 1e-9
 SCIPY_RTOL = 1e-9
 
@@ -168,24 +167,47 @@ def compute_times_and_errors(
 
     euler_results = []
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
-    for dt in dts:
-        n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
-        ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+    solver = diffrax.Euler()
+    stepsize_controller = diffrax.ConstantStepSize()
+    ode_term = diffrax.ODETerm(dynf_jax)
+    ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
+    for dt in dts:
+        ### Custom euler
+        # n_steps = 1 + jnp.ceil(time_horizon / dt).astype(jnp.uint32)
+        # ts_euler = dt * jnp.arange(0.0, n_steps + 1)
+
+        # @jax.jit
+        # def euler_func(x, u, params):
+        #     ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
+        #     return jax.vmap(
+        #         lambda y: jnp.interp(time_vector, ts_euler, y),
+        #         in_axes=1,
+        #         out_axes=1,
+        #     )(ys)
+
+        # y_euler = np.empty_like(y_scipy)
+        # t_euler = warmup_and_time(x0, u, params, y_euler, euler_func)
+
+        ### Diffrax euler
         @jax.jit
         def euler_func(x, u, params):
-            ys = dynf_jax.euler_scan(ts_euler[:-1], dt, x, u, params)
-            return jax.vmap(
-                lambda y: jnp.interp(time_vector, ts_euler, y),
-                in_axes=1,
-                out_axes=1,
-            )(ys)
+            return diffrax.diffeqsolve(
+                ode_term,
+                solver,
+                t0=0.0,
+                t1=time_horizon,
+                dt0=dt,
+                y0=x,
+                args=(u, params),
+                saveat=ts,
+                stepsize_controller=stepsize_controller,
+                max_steps=None,
+            ).ys
 
         y_euler = np.empty_like(y_scipy)
         t_euler = warmup_and_time(x0, u, params, y_euler, euler_func)
-
         error_euler = rrmse(y_scipy, y_euler)
-
         euler_results.append(
             {
                 "Method": f"Euler (dt={dt})",
@@ -195,24 +217,20 @@ def compute_times_and_errors(
             }
         )
 
-    solver = diffrax.Tsit5()
-    stepsize_controller = diffrax.PIDController(atol=1e-3, rtol=1e-6)
-    ode_term = diffrax.ODETerm(dynf_jax)
-    ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
+    print("trying the tsit5")
 
     @jax.jit
     def diffrax_tsit5_func(x, u, params):
         return diffrax.diffeqsolve(
             ode_term,
-            solver,
+            solver=diffrax.Tsit5(),
             t0=0.0,
             t1=time_horizon,
             dt0=dts[0],
             y0=x,
             args=(u, params),
             saveat=ts,
-            stepsize_controller=stepsize_controller,
-            max_steps=None,
+            stepsize_controller=diffrax.PIDController(atol=1e-9, rtol=1e-9),
         ).ys
 
     y_diffrax_tsit5 = np.empty_like(y_scipy)
@@ -369,7 +387,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    # plt.savefig("time_traj_eval_param_2704.pdf")
+    plt.savefig("time_traj_eval_param_diffrax_2804.pdf")
     plt.show()
 
 
