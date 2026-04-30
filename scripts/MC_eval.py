@@ -177,6 +177,21 @@ def main():
     est_params_diffrax = np.array(diffrax_run["est_params"])
     params_RRMSE_flumen = rrmse_param(true_params, est_params_flumen)
     params_RRMSE_diffrax = rrmse_param(true_params, est_params_diffrax)
+    threshold = 0.001
+
+    flumen_below = np.sum(params_RRMSE_flumen < threshold)
+    diffrax_below = np.sum(params_RRMSE_diffrax < threshold)
+
+    print(
+        f"Flumen parameter RRMSE below {threshold}:",
+        flumen_below / true_params.shape[0] * 100,
+        "%",
+    )
+    print(
+        f"Euler parameter RRMSE below {threshold}:",
+        diffrax_below / true_params.shape[0] * 100,
+        "%",
+    )
 
     # RRMSE loss over unseen trajectories, per estimated parameter
     traj_RRMSE_flumen_list = []
