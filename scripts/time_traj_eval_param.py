@@ -50,10 +50,10 @@ SCIPY_RTOL = 1e-9
 NUMPY_RNG_SEED = 6003550914
 
 
-def rrmse(y_true, y_other):
-    error = np.mean(
-        np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true),
-        axis=1,
+def error(y_true, y_other):
+    error = np.sqrt(
+        np.mean(np.sum((y_true - y_other) ** 2, axis=-1), axis=-1)
+        / np.mean(np.sum(y_true**2, axis=-1), axis=-1)
     )
 
     return error
@@ -123,7 +123,7 @@ def compute_times_and_errors(
     dts: list,
     use_batched=False,
 ):
-    dts.sort()
+    dts.sort(reverse=True)
 
     def scipy_compute(x0, u, params, y, func):
         t = time()
@@ -165,6 +165,34 @@ def compute_times_and_errors(
     _ = scipy_compute(x0, u, params, y_scipy, scipy_func)
     y_scipy = np.transpose(y_scipy, axes=(0, 2, 1))
 
+    y_flumen = np.empty_like(y_scipy)
+    time_vector_flumen = time_vector.reshape((-1, 1))
+    flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
+
+    solve_flumen = solve_flumen_batch if use_batched else solve_flumen_traj
+
+    @jax.jit
+    def flumen_func(x, u, params):
+        return solve_flumen(
+            flat_model,
+            model_treedef,
+            time_vector_flumen,
+            x,
+            u,
+            delta,
+            params,
+        )
+
+    t_flumen = warmup_and_time(x0, u, params, y_flumen, flumen_func)
+    error_flumen = error(y_scipy, y_flumen)
+
+    flumen_results = {
+        "Method": "Flumen",
+        r"$T$": time_horizon,
+        "Time per trajectory (s)": t_flumen,
+        "Relative error": error_flumen,
+    }
+
     euler_results = []
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     solver = diffrax.Euler()
@@ -191,13 +219,13 @@ def compute_times_and_errors(
 
         y_euler = np.empty_like(y_scipy)
         t_euler = warmup_and_time(x0, u, params, y_euler, euler_func)
-        error_euler = rrmse(y_scipy, y_euler)
+        error_euler = error(y_scipy, y_euler)
         euler_results.append(
             {
                 "Method": f"Euler (dt={dt})",
                 r"$T$": time_horizon,
                 "Time per trajectory (s)": t_euler,
-                "RRMSE": error_euler,
+                "Relative error": error_euler,
             }
         )
 
@@ -208,7 +236,7 @@ def compute_times_and_errors(
             solver=diffrax.Tsit5(),
             t0=0.0,
             t1=time_horizon,
-            dt0=dts[0],
+            dt0=dts[-1],
             y0=x,
             args=(u, params),
             saveat=ts,
@@ -220,44 +248,15 @@ def compute_times_and_errors(
         x0, u, params, y_diffrax_tsit5, diffrax_tsit5_func
     )
 
-    tsit5_error = rrmse(y_scipy, y_diffrax_tsit5)
+    tsit5_error = error(y_scipy, y_diffrax_tsit5)
 
     tsit5_results = {
         "Method": "Tsit5",
         r"$T$": time_horizon,
         "Time per trajectory (s)": t_diffrax_tsit5,
-        "RRMSE": tsit5_error,
+        "Relative error": tsit5_error,
     }
-
-    y_flumen = np.empty_like(y_scipy)
-    time_vector = time_vector.reshape((-1, 1))
-    flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
-
-    solve_flumen = solve_flumen_batch if use_batched else solve_flumen_traj
-
-    @jax.jit
-    def flumen_func(x, u, params):
-        return solve_flumen(
-            flat_model,
-            model_treedef,
-            time_vector,
-            x,
-            u,
-            delta,
-            params,
-        )
-
-    t_flumen = warmup_and_time(x0, u, params, y_flumen, flumen_func)
-    error_flumen = rrmse(y_scipy, y_flumen)
-
-    flumen_results = {
-        "Method": "Flumen",
-        r"$T$": time_horizon,
-        "Time per trajectory (s)": t_flumen,
-        "RRMSE": error_flumen,
-    }
-
-    return *euler_results, tsit5_results, flumen_results
+    return flumen_results, *euler_results, tsit5_results
 
 
 def main(args):
@@ -342,17 +341,17 @@ def main(args):
 
         all_results.extend(results)
 
-    times_and_errors = pd.DataFrame(all_results).explode("RRMSE")
+    times_and_errors = pd.DataFrame(all_results)
+    times = times_and_errors["Time per trajectory (s)"]
+    print(times_and_errors)
 
-    # get true times
-    times = times_and_errors["Time per trajectory (s)"].unique()
+    times_and_errors = times_and_errors.explode("Relative error")
 
     # jitter times to make it look nicer
     times_and_errors["Time per trajectory (s)"] = times_and_errors[
         "Time per trajectory (s)"
     ].apply(lambda x: x * (1 + uniform(-0.1, 0.1)))
 
-    print(times_and_errors)
     _, ax = plt.subplots()
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -360,7 +359,7 @@ def main(args):
     sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
-        y="RRMSE",
+        y="Relative error",
         hue="Method",
         palette="colorblind",
         ax=ax,

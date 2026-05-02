@@ -56,8 +56,10 @@ def rrmse_u(y_true, y_other):
     return error
 
 
-def rrmse_param(y_true, y_other):
-    error = np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true)
+def error(y_true, y_other):
+    error = np.sqrt(
+        np.sum((y_true - y_other) ** 2, axis=-1) / np.sum(y_true**2, axis=-1)
+    )
     return error
 
 
@@ -147,13 +149,13 @@ def compute_times_and_errors(
         return (time() - t) / (x0.shape[0] - n_warmup), y
 
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
-    dts.sort()
+    dts.sort(reverse=True)
 
     ode_term = diffrax.ODETerm(dynf_jax)
     time_vector = np.array([time_horizon])
     ts = diffrax.SaveAt(ts=time_vector)  # type: ignore
 
-    dt = dts[0]
+    dt = dts[-1]
 
     @equinox.filter_jit
     @equinox.filter_grad
@@ -178,7 +180,7 @@ def compute_times_and_errors(
     t_diffrax_euler, g_true = warmup_and_time(x0, u, params, diffrax_euler_func)
 
     diffrax_euler_results = []
-    for dt in dts[1:]:
+    for dt in dts[:-1]:
 
         @equinox.filter_jit
         @equinox.filter_grad
@@ -203,47 +205,16 @@ def compute_times_and_errors(
         t_diffrax_euler, g_diffrax_euler = warmup_and_time(
             x0, u, params, diffrax_euler_func
         )
-        error_euler = rrmse_param(g_true, g_diffrax_euler)
+        error_euler = error(g_true, g_diffrax_euler)
         print(f"Euler(dt={dt}): {t_diffrax_euler:.3e} s/traj")
         diffrax_euler_results.append(
             {
                 "Method": f"Euler (dt={dt})",
                 r"$T$": time_horizon,
                 "Time per trajectory (s)": t_diffrax_euler,
-                "RRMSE": error_euler,
+                "Relative error": error_euler,
             }
         )
-
-    @equinox.filter_jit
-    @equinox.filter_grad
-    def diffrax_tsit5_func(params, u, x):
-        y = cast(
-            Array,
-            diffrax.diffeqsolve(
-                ode_term,
-                solver=diffrax.Tsit5(),
-                t0=0.0,
-                t1=time_horizon,
-                dt0=dts[0],
-                y0=x,
-                args=(u, params),
-                saveat=ts,
-                stepsize_controller=diffrax.PIDController(atol=1e-9, rtol=1e-9),
-            ).ys,
-        )
-        return output_func(y)
-
-    t_diffrax_tsit5, g_diffrax_tsit5 = warmup_and_time(
-        x0, u, params, diffrax_tsit5_func
-    )
-    tsit5_error = rrmse_param(g_true, g_diffrax_tsit5)
-    print(f"diffrax(Tsit5): {t_diffrax_tsit5:.3e} s/traj")
-    tsit5_results = {
-        "Method": "Tsit5",
-        r"$T$": time_horizon,
-        "Time per trajectory (s)": t_diffrax_tsit5,
-        "RRMSE": tsit5_error,
-    }
 
     time_vector = time_vector.reshape((-1, 1))
     flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
@@ -265,26 +236,26 @@ def compute_times_and_errors(
 
     t_flumen, g_flumen = warmup_and_time(x0, u, params, flumen_func)
     print(f"flumen: {t_flumen:.3e} s/traj")
-    error_flumen = rrmse_param(g_true, g_flumen)
+    error_flumen = error(g_true, g_flumen)
     flumen_results = {
         "Method": "Flumen",
         r"$T$": time_horizon,
         "Time per trajectory (s)": t_flumen,
-        "RRMSE": error_flumen,
+        "Relative error": error_flumen,
     }
 
     PLOT_GRADIENTS_FLAG = False
     if PLOT_GRADIENTS_FLAG:
         _, axs = plt.subplots(min(8, g_flumen.shape[0]), 1)
         for k, ax in enumerate(axs):
-            ax.plot(g_diffrax_tsit5[k + 4], label="Tsit5")
+            # ax.plot(g_diffrax_tsit5[k + 4], label="Tsit5")
             # ax.plot(g_manual_euler[k+4], label="Euler (diffrax)")
             # ax.plot(g_diffrax_euler[k + 4], label="Euler")
             ax.plot(g_flumen[k + 4], label="flumen")
         axs[0].legend()
         plt.show()
 
-    return *diffrax_euler_results, tsit5_results, flumen_results
+    return flumen_results, *diffrax_euler_results
 
 
 def main(args):
@@ -366,20 +337,20 @@ def main(args):
 
         all_results.extend(results)
 
-    times_and_errors = (
-        pd.DataFrame(all_results).explode("RRMSE").reset_index(drop=True)
+    times_and_errors = pd.DataFrame(all_results)
+    print(times_and_errors)
+    times = times_and_errors["Time per trajectory (s)"]
+
+    times_and_errors = times_and_errors.explode("Relative error").reset_index(
+        drop=True
     )
     times_and_errors.to_pickle("grad_timings.pkl")
-
-    # get true times
-    times = times_and_errors["Time per trajectory (s)"].unique()
 
     # jitter times to make it look nicer
     times_and_errors["Time per trajectory (s)"] = times_and_errors[
         "Time per trajectory (s)"
     ].apply(lambda x: x * (1 + uniform(-0.1, 0.1)))
 
-    print(times_and_errors)
     _, ax = plt.subplots()
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -387,7 +358,7 @@ def main(args):
     sns.scatterplot(
         times_and_errors,
         x="Time per trajectory (s)",
-        y="RRMSE",
+        y="Relative error",
         hue="Method",
         palette="colorblind",
         ax=ax,
