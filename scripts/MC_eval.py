@@ -38,17 +38,19 @@ plt.rcParams.update(
 
 
 def rrmse_param(y_true, y_other):
-    # y_true: (n_trajectories, state)
-    error = np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true)
+    error = np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(
+        y_true, axis=-1
+    )
 
     return error
 
 
 def rrmse_traj(y_true, y_other):
     # y_true: (n_trajectories, time, state)
-    error = np.mean(
-        np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true),
-        axis=1,
+    #
+    error = np.sqrt(
+        np.mean(np.sum((y_true - y_other) ** 2, axis=-1), axis=-1)
+        / np.mean(np.sum(y_true**2, axis=-1), axis=-1)
     )
     mean = np.mean(error, axis=0)
     return mean.item()
@@ -162,8 +164,12 @@ def main():
     time_horizon = data["args"]["time_horizon"]
 
     # Results from MC run
-    flumen_run = torch.load("MC/ctm/flumen/results_dict.pth")
-    diffrax_run = torch.load("MC/ctm/diffrax/results_dict.pth")
+    flumen_run = torch.load(
+        "MC/ctm/flumen/results_dict.pth", weights_only=False
+    )
+    diffrax_run = torch.load(
+        "MC/ctm/diffrax/results_dict.pth", weights_only=False
+    )
 
     ### Computational performance ###
     iterations_flumen = np.array(flumen_run["iterations"])
@@ -177,7 +183,7 @@ def main():
     est_params_diffrax = np.array(diffrax_run["est_params"])
     params_RRMSE_flumen = rrmse_param(true_params, est_params_flumen)
     params_RRMSE_diffrax = rrmse_param(true_params, est_params_diffrax)
-    threshold = 0.001
+    threshold = 0.01
 
     flumen_below = np.sum(params_RRMSE_flumen < threshold)
     diffrax_below = np.sum(params_RRMSE_diffrax < threshold)
@@ -215,18 +221,6 @@ def main():
     traj_RRMSE_diffrax_np = np.array(traj_RRMSE_diffrax_list)
 
     ### Plotting ###
-    plots = [
-        ("steps", iterations_flumen, iterations_diffrax, "Steps", True),
-        ("time", times_flumen, times_diffrax, "Time (s)", True),
-        (
-            "parameter",
-            params_RRMSE_flumen,
-            params_RRMSE_diffrax,
-            "Parameter RRMSE",
-            True,
-        ),
-    ]
-
     save_dir = "ctm_MC_results"
     os.makedirs(save_dir, exist_ok=True)  # creates folder if it
     plots = [
@@ -236,17 +230,18 @@ def main():
             "parameter_RRMSE",
             params_RRMSE_flumen,
             params_RRMSE_diffrax,
-            "Parameter RRMSE",
+            "Relative error (parameter)",
             True,
         ),
         (
             "trajectory_RRMSE",
             traj_RRMSE_flumen_np,
             traj_RRMSE_diffrax_np,
-            "Trajectory RRMSE",
+            "Relative error (trajectory)",
             True,
         ),
     ]
+
     for name, fl, di, ylabel, logscale in plots:
         df = pd.DataFrame(
             {
