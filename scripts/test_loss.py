@@ -11,11 +11,12 @@ import jax.random as jrd
 import numpy as np
 import yaml
 
+
 def rrmse(y_true, y_other):
     # y_true: (n_trajectories, time, state)
-    error = np.mean(
-        np.linalg.norm(y_true - y_other, axis=-1) / np.linalg.norm(y_true),
-        axis=1,
+    error = np.sqrt(
+        np.mean(np.sum((y_true - y_other) ** 2, axis=-1), axis=-1)
+        / np.mean(np.sum(y_true**2, axis=-1), axis=-1)
     )
     mean = np.mean(error, axis=0)
     return mean.item()
@@ -45,31 +46,30 @@ def main(args):
         for k, (x_, u_, params_, time_) in enumerate(zip(x0, u, params, time)):
             y[k] = func(x_, u_, params_, time_)
 
-    if args.use_ctm:
-        # ctm model
+    data_path = Path(args.data_path)
+    data_path = Path(data_path)
+    with data_path.open("rb") as f:
+        data = pickle.load(f)
+    delta = data["settings"]["control_delta"]
+    dynamics_name = data["settings"]["dynamics"]["name"]
+
+    if dynamics_name == "ParameterisedCellTransmissionModel":
         model_path = "models_local_CTM/2704/"
-    else:
-        # vdp model
+    elif dynamics_name == "VanDerPolParameterised":
         model_path = "models_local_vdp/2904/"
+    else:
+        print("No model known")
 
     model_path = Path(model_path)
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
-
     like_model = equinox.filter_eval_shape(
         Flumen, **metadata["args"], key=jrd.key(0)
     )
     model: Flumen = equinox.tree_deserialise_leaves(
         model_path / "leaves.eqx", like_model
     )
-
-    # data over which to calculate test loss over. Should be flumen.trajectory.ParamaterisedRawTrajectoryDataset object
-    data_path = Path(args.data_path)
-    data_path = Path(data_path)
-    with data_path.open("rb") as f:
-        data = pickle.load(f)
-    delta = data["settings"]["control_delta"]
 
     test_data = TestNumPyDataset(data["test"])
     y_true, x0, u, time, params = test_data[0:]
@@ -107,12 +107,6 @@ def parse_args():
         "data_path",
         type=str,
         help="Path to data folder, should correspond to model",
-    )
-
-    ap.add_argument(
-        "--use_ctm",
-        action="store_true",
-        help="use ctm model, else use vdp model",
     )
 
     return ap.parse_args()
