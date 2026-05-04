@@ -25,6 +25,7 @@ def RRMSE_param(y_true, y_other):
     error = jnp.linalg.norm(y_true - y_other, axis=-1) / jnp.linalg.norm(y_true)
     return jnp.mean(error).item()
 
+
 class ParameterEstimator:
     def __init__(
         self,
@@ -32,20 +33,25 @@ class ParameterEstimator:
         model: Flumen | DiffraxModel | JaxModel,
         args: tuple[Array, Array, Array, Array, Float, Float],
         init_params: Parameter,
-        model_type,
     ):
         self.optim = optim
         self.model = model
         self.args = args
 
-        if model_type == "flumen":
-            self._loss_fn = self._compute_loss_flumen
-        elif model_type == "diffrax":
-            self._loss_fn = self._compute_loss_diffrax
-        elif model_type == "jax":
-            self._loss_fn = self._compute_loss_diffrax
+        if isinstance(model, Flumen):
+            self._train_loss_fn = self._train_loss_flumen
+            self._val_loss_fn = self._val_loss_flumen
+            self._eval_trajectory = eqx.filter_vmap(
+                self.model.eval_trajectory,
+                in_axes=(0, 0, 0, 0, None),
+            )
+        # DiffraxModel | JaxModel
         else:
-            raise ValueError(f"Loss function for {model_type} not supported")
+            self._train_loss_fn = self._train_loss_diffrax
+            self._val_loss_fn = self._val_loss_diffrax
+            self._eval_trajectory = eqx.filter_vmap(
+                self.model.eval_trajectory, in_axes=(0, 0, 0, None)
+            )
 
         f_struct = jax.ShapeDtypeStruct((), jnp.float32)
         aux_struct = None
@@ -54,7 +60,7 @@ class ParameterEstimator:
         self.step = eqx.filter_jit(
             eqx.Partial(
                 optim.step,
-                fn=self._loss_fn,
+                fn=self._train_loss_fn,
                 args=self.args,
                 options={},
                 tags=tags,
@@ -63,7 +69,7 @@ class ParameterEstimator:
         self.terminate = eqx.filter_jit(
             eqx.Partial(
                 optim.terminate,
-                fn=self._loss_fn,
+                fn=self._train_loss_fn,
                 args=self.args,
                 options={},
                 tags=tags,
@@ -71,7 +77,7 @@ class ParameterEstimator:
         )
 
         self.state = self.optim.init(
-            fn=self._loss_fn,
+            fn=self._train_loss_fn,
             y=init_params,
             args=self.args,
             options={},
@@ -86,7 +92,7 @@ class ParameterEstimator:
         tags = frozenset()
 
         self.state = self.optim.init(
-            fn=self._loss_fn,
+            fn=self._train_loss_fn,
             y=new_init_params,
             args=self.args,
             options={},
@@ -96,38 +102,51 @@ class ParameterEstimator:
         )
 
     @eqx.filter_jit
-    def _compute_loss_flumen(self, params, args) -> tuple[Float, Aux]:
+    def _train_loss_flumen(self, params, args) -> tuple[Float, Aux]:
         y, x0, u, t, delta, n_trajectories = args
         skips = jnp.floor(t / delta).astype(jnp.uint32)
         tau = (t - delta * skips) / delta
 
-        eval_trajectory = eqx.filter_vmap(
-            self.model.eval_trajectory,
-            in_axes=(0, 0, 0, 0, None),
-        )
-        y_pred = eval_trajectory(x0, u, tau, skips.squeeze(-1), params)
+        y_pred = self._eval_trajectory(x0, u, tau, skips.squeeze(-1), params)
 
-        loss_val = jnp.mean(jnp.square(y - y_pred))
-
+        train_loss = jnp.mean(jnp.square(y - y_pred))
         aux = None
-        return loss_val, aux
+        return train_loss, aux
 
     @eqx.filter_jit
-    def _compute_loss_diffrax(self, params, args) -> tuple[Float, Aux]:
+    def _val_loss_flumen(self, params, args) -> tuple[Float, Aux]:
+        y, x0, u, t, delta, n_trajectories = args
+        skips = jnp.floor(t / delta).astype(jnp.uint32)
+        tau = (t - delta * skips) / delta
+
+        y_pred = self._eval_trajectory(x0, u, tau, skips.squeeze(-1), params)
+        val_loss = jnp.mean(jnp.sum(jnp.square(y - y_pred), axis=-1))
+        return val_loss
+
+    @eqx.filter_jit
+    def _train_loss_diffrax(self, params, args) -> tuple[Float, Aux]:
         y, x0, u, t, _, n_trajectories = args
 
-        eval_trajectory = eqx.filter_vmap(
-            self.model.eval_trajectory, in_axes=(0, 0, 0, None)
-        )
-        y_pred = eval_trajectory(x0, u, t, params)
+        y_pred = self._eval_trajectory(x0, u, t, params)
 
         # integrator can return infinite values and / or NaN values
         y_pred = jnp.nan_to_num(y_pred, nan=0.0, posinf=0.0, neginf=0.0)
 
-        loss_val = jnp.mean(jnp.square(y - y_pred))
-
+        train_loss = jnp.mean(jnp.square(y - y_pred))
         aux = None
-        return loss_val, aux
+        return train_loss, aux
+
+    @eqx.filter_jit
+    def _val_loss_diffrax(self, params, args) -> tuple[Float, Aux]:
+        y, x0, u, t, _, n_trajectories = args
+
+        y_pred = self._eval_trajectory(x0, u, t, params)
+
+        # integrator can return infinite values and / or NaN values
+        y_pred = jnp.nan_to_num(y_pred, nan=0.0, posinf=0.0, neginf=0.0)
+
+        val_loss = jnp.mean(jnp.sum(jnp.square(y - y_pred), axis=-1))
+        return val_loss
 
     def train_step(self, params: Parameter) -> tuple[Parameter, Bool]:
         params, self.state, aux = self.step(y=params, state=self.state)
@@ -145,4 +164,4 @@ class ParameterEstimator:
             data.delta,
             len(data),
         )
-        return self._loss_fn(params, data_args)[0]
+        return self._val_loss_fn(params, data_args)

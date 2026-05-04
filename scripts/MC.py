@@ -1,5 +1,3 @@
-"""Monte carlo simulation of parameter estimation"""
-
 from argparse import ArgumentParser
 from pathlib import Path
 from indago.estimate import ParameterEstimator
@@ -9,7 +7,6 @@ from flumen_jax import Flumen
 from time import time
 from semble import (
     get_parameter_generator,
-    ParameterGenerator,
 )
 from indago.utils import (
     return_model,
@@ -26,25 +23,10 @@ import pickle
 import yaml
 import jax.numpy as jnp
 import numpy as np
-import os
 import torch
 
-hyperparameters = {
-    "n_epochs": 30,  # max number of epochs
-    "model": "flumen",  # flumen, diffrax, jax
-    "optimizer": "BFGS",  # Adam, GradientDescent, BFGS
-    "parameter_loss": "RRMSE",
-    "NUMPY_KEY_SEED": 3520758,
-}
-
-# only used when model is diffrax
-settings_diffrax = {
-    "integrator": "Euler",  # Dopri5, Dopri8, Euler, Tsit5
-    "dt0": 0.002,  # initial step size
-}
-
-# only used when model is jax
-settings_jax = {"dt": 0.002}
+# Key used for rng in init parameter sampling
+NUMPY_KEY_SEED = 3520758
 
 
 def parse_args():
@@ -53,102 +35,84 @@ def parse_args():
     ap.add_argument("data_path", type=str, help="Path to trajectory dataset")
 
     ap.add_argument(
-        "param_settings",
+        "method",
         type=str,
-        help="Path to parameter generator settings file",
+        help="Method to use for estimation. Supported: Dopri5, Dopri8, Tsit5, Euler, Flumen",
+        default="Flumen",
     )
 
     ap.add_argument(
-        "runs", type=int, help="Number of parameter estimation runs"
+        "optimizer",
+        type=str,
+        help="Optimizer to use for parameter estimation. Supported: GradientDescent, BFGS, Adam",
+        default="BFGS",
     )
 
     ap.add_argument(
-        "--model_path",
+        "init_params",
         type=str,
-        help="Path to Weights & Biases artifact (required if flumen is used)",
+        help="Path to parameter generator settings file, used to sample the initial parameter values.",
     )
 
-    ap.add_argument("name", type=str, nargs="+", help="Name of the experiment.")
+    # Optional arguments
+    ap.add_argument(
+        "--dt",
+        type=float,
+        help="initial timestep of numerical solver",
+        default=0.002,
+    )
 
+    ap.add_argument(
+        "--n_runs",
+        type=int,
+        help="number of estimation runs to perform",
+        default=50,
+    )
+
+    ap.add_argument(
+        "--experiment_name", type=str, help="experiment name", default=None
+    )
+
+    ap.add_argument(
+        "--max_steps",
+        type=int,
+        help="maximum number of steps in a parameter estimation run",
+        default=30,
+    )
     return ap.parse_args()
 
 
 def estimation_run(
-    init_params, parameter_estimator: ParameterEstimator, epochs: int
+    init_params, parameter_estimator: ParameterEstimator, max_steps: int
 ):
     est_params = init_params
-    for iter in range(epochs):
-        est_params, done_estimating = parameter_estimator.train_step(est_params)
-        if done_estimating:
-            return est_params, iter
+    for step in range(max_steps):
+        est_params, estimation_done = parameter_estimator.train_step(est_params)
+        if estimation_done:
+            return est_params, step
 
-    return est_params, iter
+    return est_params, step
 
 
 def main():
     args = parse_args()
-    rng = np.random.default_rng(seed=hyperparameters["NUMPY_KEY_SEED"])
+    rng = np.random.default_rng(seed=NUMPY_KEY_SEED)
     param_rng = rng.spawn(1)[0]
 
+    # Create experiment name
     timestamp = get_timestamp()
-    full_name = "_".join([timestamp] + args.name)
+    parts = [timestamp]
+    if args.experiment_name is not None:
+        parts.append(args.experiment_name)
+    full_name = "_".join(parts)
     full_name = re.sub("[^a-zA-Z0-9_-]", "_", full_name)
 
+    # Load in data
     data_path = Path(args.data_path)
     with data_path.open("rb") as f:
         data = pickle.load(f)
 
-    if hyperparameters["model"] == "flumen":
-        assert args.model_path, "no model path given"
-        # api = wandb.Api()
-        # model_artifact = api.artifact(args.model_path)
-        # model_path = Path(model_artifact.download())
-        model_path = Path(args.model_path)
-
-        with open(model_path / "metadata.yaml", "r") as f:
-            metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
-        model: Flumen = return_model(
-            hyperparameters["model"],
-            None,
-            metadata,
-            model_path,
-            hyperparameters,
-        )
-
-    elif hyperparameters["model"] == "diffrax":
-        dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
-        hyperparameters.update(settings_diffrax)
-        model: DiffraxModel = return_model(
-            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
-        )
-
-    elif hyperparameters["model"] == "jax":
-        dynamics_jax = return_dynamics_jax(data["settings"])
-        hyperparameters.update(settings_jax)
-        model = return_model(
-            hyperparameters["model"], dynamics_jax, None, None, hyperparameters
-        )
-
-    with open(args.param_settings, "r") as f:
-        param_settings = yaml.load(f, Loader=yaml.FullLoader)
-
-    hyperparameters["runs"] = args.runs
-    hyperparameters["init_param_settings"] = param_settings
-
-    run = wandb.init(
-        project="indago (MC)",
-        entity="aguiar-kth-royal-institute-of-technology",
-        config=hyperparameters,
-        name=full_name,
-    )
-
-    parameter_generator: ParameterGenerator = get_parameter_generator(
-        param_settings["name"], param_settings["args"]
-    )
-
     train_data = RawNumPyDataset(data["train"])
-    val_data = RawNumPyDataset(data["val"])
-    test_data = RawNumPyDataset(data["test"])
 
     y, x0, u, t = train_data[0:]
     train_data_args = (
@@ -160,38 +124,74 @@ def main():
         len(train_data),
     )
 
+    # Load in and create appropriate model
+    dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
+    dynamics_name = data["settings"]["dynamics"]["name"]
+    if dynamics_name == "ParameterisedCellTransmissionModel":
+        model_path = Path("models_local_CTM/2704/")
+    elif dynamics_name == "VanDerPolParameterised":
+        model_path = Path("models_local_vdp/2904/")
+    with open(model_path / "metadata.yaml", "r") as f:
+        metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+
+    model: Flumen | DiffraxModel = return_model(
+        args.method,
+        dynamics_jax,
+        metadata,
+        model_path,
+        args.dt,
+    )
+
+    with open(args.init_params, "r") as f:
+        init_params_settings = yaml.load(f, Loader=yaml.FullLoader)
+
+    args.init_params = init_params_settings
+
+    run = wandb.init(
+        project="indago_MC",
+        config=vars(args),
+        name=full_name,
+    )
+
+    parameter_generator = get_parameter_generator(
+        init_params_settings["name"], init_params_settings["args"]
+    )
+
     optim = get_optimizer(wandb.config["optimizer"])
+    params_loss_fn = get_parameter_loss("RRMSE")
+
     true_params = train_data.get_params
     parameter_estimator = ParameterEstimator(
-        optim, model, train_data_args, true_params, wandb.config["model"]
+        optim, model, train_data_args, true_params
     )
-    params_loss_fn = get_parameter_loss(wandb.config["parameter_loss"])
 
     n_succesful_runs = 0
-    iterations = []
+    iterations_list = []
     param_loss_list = []
     true_params_list = []
     est_params_list = []
     time_list = []
-    for i in range(wandb.config["runs"]):
-        print("simulation: ", i + 1, "/", wandb.config["runs"])
-        time_start = time()
+    for run in range(wandb.config["n_runs"]):
+        print("Run: ", run + 1, "/", wandb.config["n_runs"])
         init_params = parameter_generator.sample(param_rng)
         parameter_estimator.reset(init_params)
 
-        est_params, iter = estimation_run(
+        time_start = time()
+        est_params, steps = estimation_run(
             init_params,
             parameter_estimator,
-            wandb.config["n_epochs"],
+            wandb.config["max_steps"],
+        )
+        est_time = time() - time_start
+        param_loss = params_loss_fn(true_params, est_params)
+
+        print(
+            f"Initial params, {init_params}, estimated params: {est_params}, found in {steps + 1} steps and {est_time:.3f} [s]."
         )
 
         est_params_list.append(est_params)
         true_params_list.append(true_params)
-        est_time = time() - time_start
-        print("init params:", init_params, "est params:", est_params)
-        print("duration of run:", est_time)
-        iterations.append(iter)
-        param_loss = params_loss_fn(true_params, est_params)
+        iterations_list.append(steps)
         param_loss_list.append(param_loss)
         time_list.append(est_time)
 
@@ -199,15 +199,16 @@ def main():
             n_succesful_runs += 1
 
     results = {
-        "iterations": iterations,
+        "iterations": iterations_list,
         "time_list": time_list,
         "est_params": est_params_list,
         "true_params": true_params_list,
         "param_loss": param_loss_list,
         "n_successul_runs": n_succesful_runs,
-        "n_runs": wandb.config["runs"],
+        "n_runs": wandb.config["n_runs"],
     }
 
+    # Save and log results to WB
     torch.save(results, "results_dict.pth")
     results_artifact = wandb.Artifact(
         name=f"run_data_{wandb.run.id}",
@@ -216,11 +217,11 @@ def main():
     )
 
     results_artifact.add_file("results_dict.pth")
-    os.remove("results_dict.pth")
     wandb.log_artifact(results_artifact)
 
-    wandb.log({"images/iterations": log_loss_histogram(iterations, bins=20)})
-    # plt.close(fig)
+    wandb.log(
+        {"images/iterations": log_loss_histogram(iterations_list, bins=20)}
+    )
     wandb.log(
         {"images/parameter_loss": log_loss_histogram(param_loss_list, bins=20)}
     )
@@ -228,12 +229,12 @@ def main():
     wandb.log(
         {
             "succesful_runs": n_succesful_runs,
-            "ratio_runs": n_succesful_runs / wandb.config["runs"],
+            "ratio_runs": n_succesful_runs / wandb.config["n_runs"],
         }
     )
 
     wandb.summary["succesful_runs"] = n_succesful_runs
-    wandb.summary["ratio_runs"] = n_succesful_runs / wandb.config["runs"]
+    wandb.summary["ratio_runs"] = n_succesful_runs / wandb.config["n_runs"]
 
 
 if __name__ == "__main__":

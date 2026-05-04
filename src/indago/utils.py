@@ -28,10 +28,9 @@ def return_dynamics_jax(data_settings):
     if which == "VanDerPolParameterised":
         return Dynamics_JAX(dynamics, delta)
     elif which == "ParameterisedCellTransmissionModel":
-        # return ParameterisedCellTransmissionModelNonSmooth_Jax(dynamics, delta)
         return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     else:
-        print(f"Data model {which} not implemented")
+        print(f"Dynamics {which} not implemented")
 
 
 def return_integrator(which: str) -> dfx.AbstractERK:
@@ -50,11 +49,11 @@ def return_integrator(which: str) -> dfx.AbstractERK:
 def return_model(
     which: str,
     dynamics_jax: Dynamics_JAX,
-    metadata=None,
-    model_path=None,
-    settings=None,
+    metadata,
+    model_path,
+    dt: float,
 ) -> Flumen | DiffraxModel | JaxModel:
-    if which == "flumen":
+    if which == "Flumen":
         model: Flumen = eqx.filter_eval_shape(
             Flumen, **metadata["args"], key=jrd.key(0)
         )
@@ -63,12 +62,13 @@ def return_model(
             model_path / "leaves.eqx", model
         )
 
-    elif which == "diffrax":
-        integrator = return_integrator(settings["integrator"])
-        model = DiffraxModel(dynamics_jax, integrator, settings["dt0"])
+    elif which in ["Dopri5", "Dopri8", "Tsit5", "Euler"]:
+        integrator = return_integrator(which)
+        model = DiffraxModel(dynamics_jax, integrator, dt)
 
+    # Custom euler implementation in jax
     elif which == "jax":
-        model = JaxModel(dynamics_jax, settings["dt"])
+        model = JaxModel(dynamics_jax, dt)
 
     else:
         raise ValueError(f"Unknown model {which}.")
@@ -78,7 +78,7 @@ def return_model(
 
 def print_header():
     header_msg = (
-        f"{'Epoch':>5} :: {'Loss (Train)':>16} :: "
+        f"{'Step':>5} :: {'Loss (Train)':>16} :: "
         f"{'Loss (Val)':>16} :: {'Loss (Params)':>16} :: {'Est Params'}"
     )
 
@@ -87,14 +87,14 @@ def print_header():
 
 
 def print_losses(
-    epoch: int,
+    step: int,
     train: float,
     val: float,
     params: float,
     est_params: float,
 ):
     print(
-        f"{epoch:>5d} :: {train:>16.5e} :: {val:>16.5e} :: {params:>16.5e} :: {est_params[0]}"
+        f"{step:>5d} :: {train:>16.5e} :: {val:>16.5e} :: {params:>16.5e} :: {est_params[0]}"
     )
 
 
@@ -102,7 +102,7 @@ def get_optimizer(which: str) -> optx.AbstractMinimiser:
     if which == "BFGS":
         return optx.BFGS(
             atol=1e-12, rtol=1e-3
-        )  # tolerance has effect on early stopping (and thus total training time)!
+        ) 
     elif which == "GradientDescent":
         return optx.GradientDescent(atol=1e-12, rtol=1e-3, learning_rate=2e-2)
     elif which == "Adam":
