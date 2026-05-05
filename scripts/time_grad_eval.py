@@ -66,20 +66,19 @@ def error(y_true, y_other):
 
 def parse_args():
     ap = ArgumentParser()
-    ap.add_argument("path", type=str, help="Path to model folder.")
     ap.add_argument(
         "--n_traj_samples",
         type=int,
         help="Number of trajectories to sample.",
-        default=100,
+        default=50,
     )
     ap.add_argument(
         "--time_horizons",
         type=float,
         nargs="+",
-        default=[20.0],
+        default=[25.0],
     )
-    ap.add_argument("--dts", type=float, nargs="+", default=[0.001])
+    ap.add_argument("--dts", type=float, nargs="+", default=[0.005])
 
     return ap.parse_args()
 
@@ -260,12 +259,7 @@ def compute_times_and_errors(
 
 
 def main(args):
-    model_path = Path(args.path)
-    # import wandb
-
-    # api = wandb.Api()
-    # model_artifact = api.artifact(args.path)
-    # model_path = Path(model_artifact.download())
+    model_path = Path("models/ctm/")
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
