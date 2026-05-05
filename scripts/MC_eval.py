@@ -71,7 +71,7 @@ def rrmse_trajectory(
     delta,
     data,
     est_params_flumen,
-    est_params_diffrax,
+    est_params_euler,
 ):
 
     def compute_trajectories(x0, u, est_param, time, y, func):
@@ -84,7 +84,7 @@ def rrmse_trajectory(
     x0 = np.array(x0)
     u = np.array(u)
     t = np.array(time)
-    y_diffrax = np.empty_like(y_true)
+    y_euler = np.empty_like(y_true)
     y_flumen = np.empty_like(y_true)
 
     dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
@@ -109,8 +109,8 @@ def rrmse_trajectory(
             max_steps=100 + int(time_horizon / dt),
         ).ys
 
-    compute_trajectories(x0, u, est_params_diffrax, t, y_diffrax, euler_func)
-    traj_RRMSE_diffrax = rrmse_traj(y_true, y_diffrax)
+    compute_trajectories(x0, u, est_params_euler, t, y_euler, euler_func)
+    traj_RRMSE_euler = rrmse_traj(y_true, y_euler)
 
     flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
 
@@ -132,7 +132,7 @@ def rrmse_trajectory(
     compute_trajectories(x0, u, est_params_flumen, t, y_flumen, flumen_func)
     traj_RRMSE_flumen = rrmse_traj(y_true, y_flumen)
 
-    return traj_RRMSE_diffrax, traj_RRMSE_flumen
+    return traj_RRMSE_euler, traj_RRMSE_flumen
 
 
 def main():
@@ -164,28 +164,28 @@ def main():
 
     # Results from MC run
     flumen_run = torch.load(
-        "MC/ctm/flumen/results_dict.pth", weights_only=False
+        "results/MC/ctm/Flumen/results_dict.pth", weights_only=False
     )
-    diffrax_run = torch.load(
-        "MC/ctm/diffrax/results_dict.pth", weights_only=False
+    euler_run = torch.load(
+        "results/MC/ctm/Euler/results_dict.pth", weights_only=False
     )
 
     ### Computational performance ###
     iterations_flumen = np.array(flumen_run["iterations"])
-    iterations_diffrax = np.array(diffrax_run["iterations"])
+    iterations_euler = np.array(euler_run["iterations"])
     times_flumen = np.array(flumen_run["time_list"])
-    times_diffrax = np.array(diffrax_run["time_list"])
+    times_euler = np.array(euler_run["time_list"])
 
     ### Estimation accuracy ###
     true_params = np.array(flumen_run["true_params"])
     est_params_flumen = np.array(flumen_run["est_params"])
-    est_params_diffrax = np.array(diffrax_run["est_params"])
+    est_params_euler = np.array(euler_run["est_params"])
     params_RRMSE_flumen = rrmse_param(true_params, est_params_flumen)
-    params_RRMSE_diffrax = rrmse_param(true_params, est_params_diffrax)
+    params_RRMSE_euler = rrmse_param(true_params, est_params_euler)
     threshold = 0.01
 
     flumen_below = np.sum(params_RRMSE_flumen < threshold)
-    diffrax_below = np.sum(params_RRMSE_diffrax < threshold)
+    euler_below = np.sum(params_RRMSE_euler < threshold)
 
     print(
         f"Flumen parameter RRMSE below {threshold}:",
@@ -194,48 +194,48 @@ def main():
     )
     print(
         f"Euler parameter RRMSE below {threshold}:",
-        diffrax_below / true_params.shape[0] * 100,
+        euler_below / true_params.shape[0] * 100,
         "%",
     )
 
     # RRMSE loss over unseen trajectories, per estimated parameter
     traj_RRMSE_flumen_list = []
-    traj_RRMSE_diffrax_list = []
-    for est_param_flumen, est_param_diffrax in zip(
-        est_params_flumen, est_params_diffrax
+    traj_RRMSE_euler_list = []
+    for est_param_flumen, est_param_euler in zip(
+        est_params_flumen, est_params_euler
     ):
-        traj_RRMSE_diffrax, traj_RRMSE_flumen = rrmse_trajectory(
+        traj_RRMSE_euler, traj_RRMSE_flumen = rrmse_trajectory(
             model,
             dynamics,
             time_horizon,
             delta,
             data,
             est_param_flumen,
-            est_param_diffrax,
+            est_param_euler,
         )
         traj_RRMSE_flumen_list.append(traj_RRMSE_flumen)
-        traj_RRMSE_diffrax_list.append(traj_RRMSE_diffrax)
+        traj_RRMSE_euler_list.append(traj_RRMSE_euler)
 
     traj_RRMSE_flumen_np = np.array(traj_RRMSE_flumen_list)
-    traj_RRMSE_diffrax_np = np.array(traj_RRMSE_diffrax_list)
+    traj_RRMSE_euler_np = np.array(traj_RRMSE_euler_list)
 
     ### Plotting ###
-    save_dir = "ctm_MC_results"
+    save_dir = "results/MC"
     os.makedirs(save_dir, exist_ok=True)  # creates folder if it
     plots = [
-        ("steps", iterations_flumen, iterations_diffrax, "Steps", False),
-        ("duration", times_flumen, times_diffrax, "Duration (s)", True),
+        ("steps", iterations_flumen, iterations_euler, "Steps", False),
+        ("duration", times_flumen, times_euler, "Duration (s)", True),
         (
             "parameter_RRMSE",
             params_RRMSE_flumen,
-            params_RRMSE_diffrax,
+            params_RRMSE_euler,
             "Relative error (parameter)",
             True,
         ),
         (
             "trajectory_RRMSE",
             traj_RRMSE_flumen_np,
-            traj_RRMSE_diffrax_np,
+            traj_RRMSE_euler_np,
             "Relative error (trajectory)",
             True,
         ),

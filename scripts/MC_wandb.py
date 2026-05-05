@@ -17,6 +17,7 @@ from indago.utils import (
     log_loss_histogram,
 )
 
+import os
 import re
 import wandb
 import pickle
@@ -129,8 +130,10 @@ def main():
     dynamics_name = data["settings"]["dynamics"]["name"]
     if dynamics_name == "ParameterisedCellTransmissionModel":
         model_path = Path("models/ctm/")
+        save_dir = f"results/MC/ctm/{args.method}"
     elif dynamics_name == "VanDerPolParameterised":
         model_path = Path("models/vdp/")
+        save_dir = f"results/MC/vdp/{args.method}"
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -209,14 +212,15 @@ def main():
     }
 
     # Save and log results to WB
-    torch.save(results, "results_dict.pth")
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(results, f"{save_dir}/results_dict.pth")
     results_artifact = wandb.Artifact(
         name=f"run_data_{wandb.run.id}",
         type="eval_results",
         description="Raw iteration and parameter loss lists",
     )
 
-    results_artifact.add_file("results_dict.pth")
+    results_artifact.add_file(f"{save_dir}/results_dict.pth")
     wandb.log_artifact(results_artifact)
 
     wandb.log(

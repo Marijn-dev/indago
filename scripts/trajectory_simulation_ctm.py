@@ -183,7 +183,7 @@ def main():
         model, time_horizon, n_time_samples, dynamics, x0, u, params, delta
     )
 
-    save_dir = "ctm_trajectories"
+    save_dir = "results/trajectory_simulation/ctm"
     os.makedirs(save_dir, exist_ok=True)  # creates folder if it doesn't exist
     xx = dynamics.get_space_axis()
     for trajectory in range(0, n_trajectories):
@@ -237,7 +237,7 @@ def main():
         # fig.tight_layout()
         # fig.subplots_adjust(hspace=0.5)
         plt.setp([a.get_xticklabels() for a in ax[:2]], visible=False)
-        plt.savefig(f"ctm_trajectories/trajectory_{trajectory}.pdf")
+        plt.savefig(f"{save_dir}/trajectory_{trajectory}.pdf")
         plt.close(fig)
 
 

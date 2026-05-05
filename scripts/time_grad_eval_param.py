@@ -21,6 +21,7 @@ from semble.initial_state import (
 from semble.sequence_generators import SequenceGenerator, get_sequence_generator
 from flumen_jax import Flumen
 
+import os
 import diffrax
 import equinox
 import jax
@@ -366,7 +367,8 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("grad_timings.pdf")
+    os.makedirs("results", exist_ok=True)
+    plt.savefig("results/grad_timings.pdf")
     plt.show()
 
 

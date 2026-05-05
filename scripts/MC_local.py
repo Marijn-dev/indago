@@ -16,6 +16,7 @@ from indago.utils import (
     get_timestamp,
 )
 
+import os
 import re
 import pickle
 import yaml
@@ -127,8 +128,10 @@ def main():
     dynamics_name = data["settings"]["dynamics"]["name"]
     if dynamics_name == "ParameterisedCellTransmissionModel":
         model_path = Path("models/ctm/")
+        save_dir = f"results/MC/ctm/{args.method}"
     elif dynamics_name == "VanDerPolParameterised":
         model_path = Path("models/vdp/")
+        save_dir = f"results/MC/vdp/{args.method}"
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -200,8 +203,10 @@ def main():
         "n_runs": args.n_runs,
     }
 
+
     # Save and log results to WB
-    torch.save(results, "results_dict.pth")
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(results, f"{save_dir}/results_dict.pth")
 
 
 if __name__ == "__main__":

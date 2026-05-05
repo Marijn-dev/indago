@@ -3,6 +3,7 @@ from pathlib import Path
 from random import uniform
 from time import time
 
+import os
 import diffrax
 import equinox
 import jax
@@ -55,7 +56,6 @@ def error(y_true, y_other):
         np.mean(np.sum((y_true - y_other) ** 2, axis=-1), axis=-1)
         / np.mean(np.sum(y_true**2, axis=-1), axis=-1)
     )
-
     return error
 
 
@@ -367,7 +367,8 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    plt.savefig("traj_timings.pdf")
+    os.makedirs("results", exist_ok=True)
+    plt.savefig("results/traj_timings.pdf")
     plt.show()
 
 
