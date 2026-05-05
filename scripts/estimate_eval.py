@@ -101,7 +101,7 @@ def main():
 
     plt.tight_layout()
     plt.grid()
-    save_dir = "results/estimation/vdp"
+    save_dir = os.path.dirname(os.path.dirname(args.results_one))
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig(f"{save_dir}/results.pdf", bbox_inches="tight")
     plt.show()
