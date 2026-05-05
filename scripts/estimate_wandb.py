@@ -15,6 +15,7 @@ from indago.utils import (
     print_losses,
 )
 
+import os
 import re
 import wandb
 import pickle
@@ -105,8 +106,10 @@ def main():
     dynamics_name = data["settings"]["dynamics"]["name"]
     if dynamics_name == "ParameterisedCellTransmissionModel":
         model_path = Path("models/ctm/")
+        save_dir = f"results/estimation/ctm/{args.method}"
     elif dynamics_name == "VanDerPolParameterised":
         model_path = Path("models/vdp/")
+        save_dir = f"results/estimation/vdp/{args.method}"
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -157,6 +160,9 @@ def main():
             "params_est": est_params[0],
         }
     )
+    val_loss_list = []
+    est_params_list = []
+    params_loss_list = []
     time_start = time()
     for step in range(wandb.config["max_steps"]):
         est_params, estimation_done = parameter_estimator.train_step(est_params)
@@ -165,6 +171,11 @@ def main():
         params_loss = params_loss_fn(true_params, est_params)
         print_losses(step + 1, train_loss, val_loss, params_loss, est_params)
         est_time = time() - time_start
+
+        val_loss_list.append(val_loss)
+        est_params_list.append(est_params)
+        params_loss_list.append(params_loss)
+
         wandb.log(
             {
                 "time [s]": est_time,
@@ -176,10 +187,6 @@ def main():
             }
         )
         if estimation_done:
-            print(
-                f"Estimated params: {est_params}, found in {step + 1} steps and {est_time:.3f} [s]."
-            )
-
             run.summary["final_train"] = train_loss
             run.summary["final_val"] = val_loss
             run.summary["test"] = parameter_estimator.validate(
@@ -191,10 +198,10 @@ def main():
             run.summary["params_loss"] = params_loss
             run.summary["training time [s]"] = est_time
             run.summary["iterations"] = step + 1
-            return
+            break
 
     print(
-        f"Max steps reached. Estimated params: {est_params}, found in {step + 1} iterations and {est_time:.3f} [s]."
+        f"Estimated params: {est_params}, found in {step + 1} steps and {est_time:.3f} [s]."
     )
 
     run.summary["final_train"] = train_loss
@@ -206,6 +213,16 @@ def main():
     run.summary["params_loss"] = params_loss
     run.summary["training time [s]"] = est_time
     run.summary["steps"] = step + 1
+
+    results_dict = {
+        "val_losses": val_loss_list,
+        "est_params": est_params_list,
+        "params_loss": params_loss_list,
+    }
+
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "results_dict.pkl"), "wb") as f:
+        pickle.dump(results_dict, f)
 
 
 if __name__ == "__main__":

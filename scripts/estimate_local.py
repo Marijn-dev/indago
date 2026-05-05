@@ -15,6 +15,7 @@ from indago.utils import (
     print_losses,
 )
 
+import os
 import re
 import pickle
 import yaml
@@ -30,7 +31,6 @@ def parse_args():
         "method",
         type=str,
         help="Method to use for estimation. Supported: Dopri5, Dopri8, Tsit5, Euler, Flumen",
-        default="Flumen",
     )
 
     ap.add_argument(
@@ -103,8 +103,10 @@ def main():
     dynamics_name = data["settings"]["dynamics"]["name"]
     if dynamics_name == "ParameterisedCellTransmissionModel":
         model_path = Path("models/ctm/")
+        save_dir = f"results/estimation/ctm/{args.method}"
     elif dynamics_name == "VanDerPolParameterised":
         model_path = Path("models/vdp/")
+        save_dir = f"results/estimation/vdp/{args.method}"
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -138,6 +140,9 @@ def main():
     print_header()
     print_losses(0, train_loss, val_loss, params_loss, est_params)
 
+    val_loss_list = []
+    est_params_list = []
+    params_loss_list = []
     time_start = time()
     for step in range(args.max_steps):
         est_params, estimation_done = parameter_estimator.train_step(est_params)
@@ -147,15 +152,26 @@ def main():
         print_losses(step + 1, train_loss, val_loss, params_loss, est_params)
         est_time = time() - time_start
 
+        val_loss_list.append(val_loss)
+        est_params_list.append(est_params)
+        params_loss_list.append(params_loss)
+
         if estimation_done:
-            print(
-                f"Estimated params: {est_params}, found in {step + 1} steps and {est_time:.3f} [s]."
-            )
-            return
+            break
 
     print(
-        f"Max steps reached. Estimated params: {est_params}, found in {step + 1} iterations and {est_time:.3f} [s]."
+        f"Estimated params: {est_params}, found in {step + 1} steps and {est_time:.3f} [s]."
     )
+
+    results_dict = {
+        "val_losses": val_loss_list,
+        "est_params": est_params_list,
+        "params_loss": params_loss_list,
+    }
+
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "results_dict.pkl"), "wb") as f:
+        pickle.dump(results_dict, f)
 
 
 if __name__ == "__main__":
