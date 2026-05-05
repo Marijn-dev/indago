@@ -134,7 +134,7 @@ def compute_trajectories(
 
 
 def main():
-    path = "models_local_CTM/2704/"
+    path = "models/ctm/"
     model_path = Path(path)
 
     with open(model_path / "metadata.yaml", "r") as f:

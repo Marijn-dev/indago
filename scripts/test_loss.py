@@ -54,13 +54,11 @@ def main(args):
     dynamics_name = data["settings"]["dynamics"]["name"]
 
     if dynamics_name == "ParameterisedCellTransmissionModel":
-        model_path = "models_local_CTM/2704/"
+        model_path = Path("models/ctm/")
     elif dynamics_name == "VanDerPolParameterised":
-        model_path = "models_local_vdp/2904/"
+        model_path = Path("models/vdp/")
     else:
-        print("No model known")
-
-    model_path = Path(model_path)
+        print("No model for dynamics known")
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)

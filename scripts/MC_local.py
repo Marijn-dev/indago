@@ -126,9 +126,9 @@ def main():
     dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
     dynamics_name = data["settings"]["dynamics"]["name"]
     if dynamics_name == "ParameterisedCellTransmissionModel":
-        model_path = Path("models_local_CTM/2704/")
+        model_path = Path("models/ctm/")
     elif dynamics_name == "VanDerPolParameterised":
-        model_path = Path("models_local_vdp/2904/")
+        model_path = Path("models/vdp/")
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
 

@@ -133,7 +133,7 @@ def compute_trajectories(
 
 
 def main():
-    path = "models_local_vdp/2904/"
+    path = "models/vdp/"
     model_path = Path(path)
 
     with open(model_path / "metadata.yaml", "r") as f:

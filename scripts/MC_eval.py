@@ -138,7 +138,7 @@ def rrmse_trajectory(
 def main():
 
     # Flumen model used for MC
-    model_path = "models_local_CTM/2704/"
+    model_path = "models/ctm/"
     model_path = Path(model_path)
 
     with open(model_path / "metadata.yaml", "r") as f:
@@ -153,7 +153,6 @@ def main():
 
     # data used for MC
     data_path = Path("data/pCTM_T10_N100_s033_q028.pkl")
-    data_path = Path(data_path)
     with data_path.open("rb") as f:
         data = pickle.load(f)
 
