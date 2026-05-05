@@ -218,6 +218,7 @@ def main():
         "val_losses": val_loss_list,
         "est_params": est_params_list,
         "params_loss": params_loss_list,
+        "method": args.method,
     }
 
     os.makedirs(save_dir, exist_ok=True)
