@@ -339,7 +339,9 @@ def main(args):
     times_and_errors = times_and_errors.explode("Relative error").reset_index(
         drop=True
     )
-    times_and_errors.to_pickle("grad_timings.pkl")
+    save_dir = "results/timings/ctm"
+    os.makedirs(save_dir, exist_ok=True)
+    times_and_errors.to_pickle(f"{save_dir}/grad_timings.pkl")
 
     # jitter times to make it look nicer
     times_and_errors["Time per trajectory (s)"] = times_and_errors[
@@ -361,8 +363,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    os.makedirs("results", exist_ok=True)
-    plt.savefig("results/grad_timings.pdf")
+    plt.savefig(f"{save_dir}/grad_timings.pdf")
     plt.show()
 
 
