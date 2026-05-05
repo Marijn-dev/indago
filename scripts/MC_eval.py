@@ -152,7 +152,7 @@ def main():
     )
 
     # data used for MC
-    data_path = Path("data/pCTM_T10_N100_s033_q028.pkl")
+    data_path = Path("data/ctm/M_60.pkl")
     with data_path.open("rb") as f:
         data = pickle.load(f)
 
