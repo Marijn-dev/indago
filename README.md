@@ -63,7 +63,7 @@ These results can then be analyzed and compared using the `./scripts/estimate_ev
 this will save the corresponding figure in `./results/estimation/vdp/results.pdf`.
 
 ### Monte Carlo Experiment
-To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used in figures 6 and 7:
+To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used in figures 7 and 8:
 ```shell
   python scripts/MC_local.py data/ctm/M_60.pkl Flumen BFGS parameter_generation/ctm_param.yaml --n_runs 50 
 ```
@@ -73,7 +73,7 @@ and
 ```
 which will create results in `./results/MC/ctm/Flumen/results.dict.pkl` and `./results/MC/ctm/Euler/results.dict.pkl`, respectively.
 
-Then, these results can be analyzed using `./scripts/MC_eval.py`. To recreate figures 6 and 7:
+Then, these results can be analyzed using `./scripts/MC_eval.py`. To recreate figures 7 and 8:
 ```shell
   python scripts/MC_eval.py results/MC/ctm/Flumen/results_dict.pkl results/estimation/vdp/Tsit5/results_dict.pkl
 ```
