@@ -52,7 +52,7 @@ This data can be used for a parameter estimation experiment, using either `./scr
 ```
 and 
 ```shell
-  python scripts/estimate_local.py data/vdp/M_60.pkl Tsit5 GradientDescent 0.5 --dt 0.01
+  python scripts/estimate_local.py data/vdp_M_60.pkl Tsit5 GradientDescent 0.5 --dt 0.01
 ```
 which will also save the results in `./results/estimation/vdp/Flumen/results_dict.pkl` and `./results/estimation/vdp/Tsit5/results_dict.pkl`, respectively.
 
