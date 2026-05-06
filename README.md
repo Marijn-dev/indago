@@ -7,9 +7,24 @@ The corresponding models and data used in the paper can be found in the `./model
 
 The models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
 
-The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate the Van der Pol data used in Table 1 (i):
+The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate the Van der Pol data with the same settings as in Table 1 (i):
 ```shell
-  python scripts/creat_data.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml vdp_M60
+  python scripts/create_data.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml M_60
 ```
-This will create a data file in `./data/vdp/vdp_M60.pkl`.
+This will create a data file in `./data/vdp/M_60.pkl`.
 
+Then, this data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate a result in Table 1 (i) using gradient descent and $\hat{\theta}_0=0.5$:
+```shell
+  python scripts/estimate_local.py data/vdp/M_60.pkl Flumen GradientDescent 0.5
+```
+and 
+```shell
+  python scripts/estimate_local.py data/vdp/M_60.pkl Tsit5 GradientDescent 0.5 --dt 0.01
+```
+which will also save the results in `./results/estimation/vdp/Flumen/results_dict.pkl` and `./results/estimation/vdp/Tsit5/results_dict.pkl`, respectively.
+
+These results can then be analyzed and compared using the `./scripts/estimate_eval.py` script. For example, to recreate figure 4:
+```shell
+  python scripts/estimate_eval.py results/estimation/vdp/Flumen/results_dict.pkl results/estimation/vdp/Tsit5/results_dict.pkl
+```
+this will save the corresponding figure in `./results/estimation/vdp/results.pdf`.
