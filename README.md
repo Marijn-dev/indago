@@ -9,7 +9,7 @@ The corresponding models and data used in the paper can be found in the `./model
 The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
 
 ## Test Set Performance and Trajectory Visualization
-The datasets containing the testsets available [HERE]. The reported RRMSE test losses can be calculated using the `./scripts/create_data.py` script:
+The datasets containing the testsets are available [HERE]. The reported RRMSE test losses in the paper can be calculated using the `./scripts/create_data.py` script:
 ```shell
   python scripts/test_loss.py [data_path]
 ```
@@ -26,13 +26,13 @@ and
 which will save the plots in figures 3 and 5 in the folders `./results/trajectory_simulation/vdp/` and `./results/trajectory_simulation/ctm/`, respectively. To simulate different trajectories, change the NUMPY_RNG_SEED value in the script.
 
 ## Simulation Performance
-To create the trajectory simulation result in the figure 6 (a), use the `./scripts/time_traj_eval.py`:
+To create the trajectory simulation result in the figure 6 (a), use the `./scripts/time_traj_eval.py` script:
 ```shell
   python scripts/time_traj_eval.py --n_traj_samples 50 --n_times_samples 100 --time_horizons 25 --dts 0.002 0.001 0.0005
 ```
 which will save the figure in `./results/simulation_performance/ctm/traj_timings.pdf`
 
-To create the gradient computation result in the figure 6 (b), use the `./scripts/time_grad_eval.py`:
+To create the gradient computation result in the figure 6 (b), use the `./scripts/time_grad_eval.py` script:
 ```shell
   python scripts/time_grad_eval.py --n_traj_samples 50 --time_horizons 25 --dts 0.002 0.001 0.0005 0.0002
 ```
@@ -46,7 +46,7 @@ The data for a parameter estimation experiment can be created using the `./scrip
 This will create a data file in `./data/vdp/M_60.pkl`.
 
 ### Single Experiment
-Then, this data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate the result in Table 1 (i) that uses gradient descent and $\hat{\theta}_0=0.5$:
+This data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate the result in Table 1 (i) that uses gradient descent and $\hat{\theta}_0=0.5$:
 ```shell
   python scripts/estimate_local.py data/vdp/M_60.pkl Flumen GradientDescent 0.5
 ```
@@ -56,7 +56,7 @@ and
 ```
 which will also save the results in `./results/estimation/vdp/Flumen/results_dict.pkl` and `./results/estimation/vdp/Tsit5/results_dict.pkl`, respectively.
 
-These results can then be analyzed and compared using the `./scripts/estimate_eval.py` script. For example, to recreate figure 4:
+These results can then be analyzed and compared using the `./scripts/estimate_eval.py` script. To recreate figure 4:
 ```shell
   python scripts/estimate_eval.py results/estimation/vdp/Flumen/results_dict.pkl results/estimation/vdp/Tsit5/results_dict.pkl
 ```
@@ -73,7 +73,7 @@ and
 ```
 which will create results in `./results/MC/ctm/Flumen/results.dict.pkl` and `./results/MC/ctm/Euler/results.dict.pkl`, respectively.
 
-Then, these results can be analyzed using `./scripts/MC_eval.py`. For example, to recreate figures 6 and 7:
+Then, these results can be analyzed using `./scripts/MC_eval.py`. To recreate figures 6 and 7:
 ```shell
   python scripts/MC_eval.py results/MC/ctm/Flumen/results_dict.pkl results/estimation/vdp/Tsit5/results_dict.pkl
 ```
