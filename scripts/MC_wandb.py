@@ -24,7 +24,6 @@ import pickle
 import yaml
 import jax.numpy as jnp
 import numpy as np
-import torch
 
 # Key used for rng in init parameter sampling
 NUMPY_KEY_SEED = 3520758
@@ -169,7 +168,7 @@ def main():
     )
 
     n_succesful_runs = 0
-    iterations_list = []
+    steps_list = []
     param_loss_list = []
     true_params_list = []
     est_params_list = []
@@ -194,38 +193,40 @@ def main():
 
         est_params_list.append(est_params)
         true_params_list.append(true_params)
-        iterations_list.append(steps)
+        steps_list.append(steps)
         param_loss_list.append(param_loss)
         time_list.append(est_time)
 
         if param_loss < 0.01:
             n_succesful_runs += 1
 
-    results = {
-        "iterations": iterations_list,
+    results_dict = {
+        "steps": steps_list,
         "time_list": time_list,
         "est_params": est_params_list,
         "true_params": true_params_list,
         "param_loss": param_loss_list,
         "n_successul_runs": n_succesful_runs,
-        "n_runs": wandb.config["n_runs"],
+        "n_runs": args.n_runs,
+        "method": args.method,
+        "dt": args.dt,
+        "dynamics": dynamics_name,
     }
 
-    # Save and log results to WB
-    os.makedirs(save_dir, exist_ok=True)
-    torch.save(results, f"{save_dir}/results_dict.pth")
+    with open(os.path.join(save_dir, "results_dict.pkl"), "wb") as f:
+        pickle.dump(results_dict, f)
+
+    # Log as artifact
     results_artifact = wandb.Artifact(
         name=f"run_data_{wandb.run.id}",
         type="eval_results",
-        description="Raw iteration and parameter loss lists",
+        description="Results of experiment",
     )
 
-    results_artifact.add_file(f"{save_dir}/results_dict.pth")
+    results_artifact.add_file(os.path.join(save_dir, "results_dict.pkl"))
     wandb.log_artifact(results_artifact)
 
-    wandb.log(
-        {"images/iterations": log_loss_histogram(iterations_list, bins=20)}
-    )
+    wandb.log({"images/iterations": log_loss_histogram(steps_list, bins=20)})
     wandb.log(
         {"images/parameter_loss": log_loss_histogram(param_loss_list, bins=20)}
     )

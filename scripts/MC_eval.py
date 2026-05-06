@@ -1,8 +1,11 @@
 from pathlib import Path
+from argparse import ArgumentParser
+from flumen_jax import Flumen
+from indago.dataloader import RawNumPyDataset
+from indago.utils import return_dynamics_jax, return_model
+
 import seaborn as sns
 import pandas as pd
-import diffrax
-import torch
 import pickle
 import os
 import equinox
@@ -12,16 +15,7 @@ import jax.random as jrd
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
-from flumen_jax import Flumen
-from semble.dynamics import (
-    ParameterisedCellTransmissionModel,
-)
 
-from indago.dataloader import RawNumPyDataset
-
-from indago.model import (
-    ParameterisedCellTransmissionModel_Jax,
-)
 
 plt.rcParams.update(
     {
@@ -66,12 +60,11 @@ def solve_flumen_traj(flat_model, model_treedef, t, x0, u, delta, params):
 
 def rrmse_trajectory(
     flumen,
-    dynamics,
-    time_horizon,
+    dynamics_jax,
     delta,
     data,
     est_params_flumen,
-    est_params_euler,
+    est_params_other,
 ):
 
     def compute_trajectories(x0, u, est_param, time, y, func):
@@ -84,33 +77,15 @@ def rrmse_trajectory(
     x0 = np.array(x0)
     u = np.array(u)
     t = np.array(time)
-    y_euler = np.empty_like(y_true)
+    y_other = np.empty_like(y_true)
     y_flumen = np.empty_like(y_true)
 
-    dynf_jax = ParameterisedCellTransmissionModel_Jax(dynamics, delta)
-    solver = diffrax.Euler()
-    stepsize_controller = diffrax.ConstantStepSize()
-    ode_term = diffrax.ODETerm(dynf_jax)
-    dt = 0.002
-
     @jax.jit
-    def euler_func(x, u, params, time_vector):
-        t_samples = time_vector.reshape(-1)  # [seq_len, 1] -> [seq_len]
-        return diffrax.diffeqsolve(
-            ode_term,
-            solver,
-            t0=0.0,
-            t1=time_horizon,
-            dt0=dt,
-            y0=x,
-            args=(u, params),
-            saveat=diffrax.SaveAt(ts=t_samples),
-            stepsize_controller=stepsize_controller,
-            max_steps=100 + int(time_horizon / dt),
-        ).ys
+    def other_func(x, u, params, time_vector):
+        return dynamics_jax.eval_trajectory(x, u, time_vector, params)
 
-    compute_trajectories(x0, u, est_params_euler, t, y_euler, euler_func)
-    traj_RRMSE_euler = rrmse_traj(y_true, y_euler)
+    compute_trajectories(x0, u, est_params_other, t, y_other, other_func)
+    traj_RRMSE_other = rrmse_traj(y_true, y_other)
 
     flat_model, model_treedef = jax.tree_util.tree_flatten(flumen)
 
@@ -132,110 +107,127 @@ def rrmse_trajectory(
     compute_trajectories(x0, u, est_params_flumen, t, y_flumen, flumen_func)
     traj_RRMSE_flumen = rrmse_traj(y_true, y_flumen)
 
-    return traj_RRMSE_euler, traj_RRMSE_flumen
+    return traj_RRMSE_other, traj_RRMSE_flumen
+
+
+def parse_args():
+
+    ap = ArgumentParser()
+
+    ap.add_argument("data_path", type=str, help="Path to data used for MC")
+
+    ap.add_argument("results_flumen", type=str, help="Path to pkl MC results")
+
+    ap.add_argument("results_other", type=str, help="Path to pkl MC results")
+
+    return ap.parse_args()
 
 
 def main():
 
-    # Flumen model used for MC
-    model_path = "models/ctm/"
-    model_path = Path(model_path)
+    args = parse_args()
 
+    # Load in data and results
+    data_path = Path(args.data_path)
+    with data_path.open("rb") as f:
+        data = pickle.load(f)
+    data_path = Path(args.results_flumen)
+    with data_path.open("rb") as f:
+        results_flumen = pickle.load(f)
+    data_path = Path(args.results_other)
+    with data_path.open("rb") as f:
+        results_other = pickle.load(f)
+
+    ds = data["settings"]
+    dynamics_name = ds["dynamics"]["name"]
+    if dynamics_name == "ParameterisedCellTransmissionModel":
+        model_path = Path("models/ctm/")
+        save_dir = "results/MC/ctm"
+    elif dynamics_name == "VanDerPolParameterised":
+        model_path = Path("models/vdp/")
+        save_dir = "results/MC/vdp"
+
+    # load in Flumen and numerical solver
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
-
     like_model = equinox.filter_eval_shape(
         Flumen, **metadata["args"], key=jrd.key(0)
     )
     model: Flumen = equinox.tree_deserialise_leaves(
         model_path / "leaves.eqx", like_model
     )
-
-    # data used for MC
-    data_path = Path("data/ctm/M_60.pkl")
-    with data_path.open("rb") as f:
-        data = pickle.load(f)
-
-    ds = metadata["data_settings"]
-    dynamics = ParameterisedCellTransmissionModel(**ds["dynamics"]["args"])
-
-    delta = data["settings"]["control_delta"]
-    time_horizon = data["args"]["time_horizon"]
-
-    # Results from MC run
-    flumen_run = torch.load(
-        "results/MC/ctm/Flumen/results_dict.pth", weights_only=False
+    dynamics_jax = return_dynamics_jax(ds)
+    jax_model = return_model(
+        results_other["method"], dynamics_jax, None, None, results_other["dt"]
     )
-    euler_run = torch.load(
-        "results/MC/ctm/Euler/results_dict.pth", weights_only=False
-    )
+
+    delta = ds["control_delta"]
 
     ### Computational performance ###
-    iterations_flumen = np.array(flumen_run["iterations"])
-    iterations_euler = np.array(euler_run["iterations"])
-    times_flumen = np.array(flumen_run["time_list"])
-    times_euler = np.array(euler_run["time_list"])
+    iterations_flumen = np.array(results_flumen["steps"])
+    iterations_other = np.array(results_other["steps"])
+    times_flumen = np.array(results_flumen["time_list"])
+    times_other = np.array(results_other["time_list"])
 
     ### Estimation accuracy ###
-    true_params = np.array(flumen_run["true_params"])
-    est_params_flumen = np.array(flumen_run["est_params"])
-    est_params_euler = np.array(euler_run["est_params"])
+    true_params = np.array(results_flumen["true_params"])
+    est_params_flumen = np.array(results_flumen["est_params"])
+    est_params_other = np.array(results_other["est_params"])
     params_RRMSE_flumen = rrmse_param(true_params, est_params_flumen)
-    params_RRMSE_euler = rrmse_param(true_params, est_params_euler)
-    threshold = 0.01
+    params_RRMSE_other = rrmse_param(true_params, est_params_other)
+    threshold = 0.01  # threshold when classified as successful run
 
     flumen_below = np.sum(params_RRMSE_flumen < threshold)
-    euler_below = np.sum(params_RRMSE_euler < threshold)
+    other_below = np.sum(params_RRMSE_other < threshold)
 
+    other_method = results_other["method"]
     print(
         f"Flumen parameter RRMSE below {threshold}:",
         flumen_below / true_params.shape[0] * 100,
-        "%",
+        "% of runs",
     )
     print(
-        f"Euler parameter RRMSE below {threshold}:",
-        euler_below / true_params.shape[0] * 100,
-        "%",
+        f"{other_method} parameter RRMSE below {threshold}:",
+        other_below / true_params.shape[0] * 100,
+        "% of runs",
     )
 
     # RRMSE loss over unseen trajectories, per estimated parameter
     traj_RRMSE_flumen_list = []
-    traj_RRMSE_euler_list = []
-    for est_param_flumen, est_param_euler in zip(
-        est_params_flumen, est_params_euler
+    traj_RRMSE_other_list = []
+    for est_param_flumen, est_param_other in zip(
+        est_params_flumen, est_params_other
     ):
-        traj_RRMSE_euler, traj_RRMSE_flumen = rrmse_trajectory(
+        traj_RRMSE_other, traj_RRMSE_flumen = rrmse_trajectory(
             model,
-            dynamics,
-            time_horizon,
+            jax_model,
             delta,
             data,
             est_param_flumen,
-            est_param_euler,
+            est_param_other,
         )
         traj_RRMSE_flumen_list.append(traj_RRMSE_flumen)
-        traj_RRMSE_euler_list.append(traj_RRMSE_euler)
+        traj_RRMSE_other_list.append(traj_RRMSE_other)
 
     traj_RRMSE_flumen_np = np.array(traj_RRMSE_flumen_list)
-    traj_RRMSE_euler_np = np.array(traj_RRMSE_euler_list)
+    traj_RRMSE_other_np = np.array(traj_RRMSE_other_list)
 
     ### Plotting ###
-    save_dir = "results/MC"
     os.makedirs(save_dir, exist_ok=True)  # creates folder if it
     plots = [
-        ("steps", iterations_flumen, iterations_euler, "Steps", False),
-        ("duration", times_flumen, times_euler, "Duration (s)", True),
+        ("steps", iterations_flumen, iterations_other, "Steps", False),
+        ("duration", times_flumen, times_other, "Duration (s)", True),
         (
             "parameter_RRMSE",
             params_RRMSE_flumen,
-            params_RRMSE_euler,
+            params_RRMSE_other,
             "Relative error (parameter)",
             True,
         ),
         (
             "trajectory_RRMSE",
             traj_RRMSE_flumen_np,
-            traj_RRMSE_euler_np,
+            traj_RRMSE_other_np,
             "Relative error (trajectory)",
             True,
         ),
@@ -245,7 +237,8 @@ def main():
         df = pd.DataFrame(
             {
                 "Value": np.concatenate([fl, di]),
-                "Method": (["Flumen"] * len(fl)) + (["Euler"] * len(di)),
+                "Method": (["Flumen"] * len(fl))
+                + ([f"{other_method}"] * len(di)),
             }
         )
 
