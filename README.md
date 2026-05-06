@@ -8,6 +8,8 @@ The corresponding models and data used in the paper can be found in the `./model
 
 The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
 
+## Trajectory Simulation
+
 ## Parameter Estimation
 The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
 ```shell
@@ -15,7 +17,8 @@ The data for a parameter estimation experiment can be created using the `./scrip
 ```
 This will create a data file in `./data/vdp/M_60.pkl`.
 
-Then, this data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate a result in Table 1 (i) using gradient descent and $\hat{\theta}_0=0.5$:
+### Single Experiment
+Then, this data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate the result in Table 1 (i) that uses gradient descent and $\hat{\theta}_0=0.5$:
 ```shell
   python scripts/estimate_local.py data/vdp/M_60.pkl Flumen GradientDescent 0.5
 ```
@@ -31,6 +34,7 @@ These results can then be analyzed and compared using the `./scripts/estimate_ev
 ```
 this will save the corresponding figure in `./results/estimation/vdp/results.pdf`.
 
+### Monte Carlo experiment
 To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used to generate figure 6 and 7:
 ```shell
   python scripts/MC_local.py data/ctm/M_60.pkl Flumen BFGS parameter_generation/ctm_param.yaml --n_runs 50 
