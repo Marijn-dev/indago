@@ -1,4 +1,5 @@
 # indago
+---
 A package for estimating parameters in control systems. 
 
 This repository also contains the data and scripts used to reproduce and generate the results presented in [Miguel Aguiar, Marijn Ruiter, Amritam Das and Karl H. Johansson, _Flumen: Flow function learning for surrogate modelling of control systems (2026)]
