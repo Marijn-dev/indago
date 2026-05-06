@@ -1,0 +1,19 @@
+dynamics:
+  name: VanDerPolParameterised
+  args:
+    parameter_generator: 
+      name: Delta 
+      args:
+        # Damping coefficient
+        value: 1.0
+sequence_generator:
+  name: GaussianSqWave
+  args:
+    period: 2
+control_delta: 0.5
+initial_state_generator:
+  name: UniformInitialState
+  args:
+    n: 2
+    min: -4.0
+    max: 4.0

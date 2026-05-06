@@ -41,7 +41,7 @@ which will save the figure in `./results/simulation_performance/ctm/grad_timings
 ## Parameter Estimation
 The data for a parameter estimation experiment can be created using the `./scripts/semble_generate.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
 ```shell
-  python scripts/semble_generate.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml vdp_M_60
+  python scripts/semble_generate.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data_generation/vdp.yaml vdp_M_60
 ```
 This will create a data file in `./data/vdp_M_60.pkl`.
 
