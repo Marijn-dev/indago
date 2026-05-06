@@ -39,16 +39,16 @@ To create the gradient computation result in the figure 6 (b), use the `./script
 which will save the figure in `./results/simulation_performance/ctm/grad_timings.pdf`
 
 ## Parameter Estimation
-The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
+The data for a parameter estimation experiment can be created using the `./scripts/semble_generate.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
 ```shell
-  python scripts/create_data.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml M_60
+  python scripts/semble_generate.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml vdp_M_60
 ```
-This will create a data file in `./data/vdp/M_60.pkl`.
+This will create a data file in `./data/vdp_M_60.pkl`.
 
 ### Single Experiment
 This data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate the result in Table 1 (i) that uses gradient descent and $\hat{\theta}_0=0.5$:
 ```shell
-  python scripts/estimate_local.py data/vdp/M_60.pkl Flumen GradientDescent 0.5
+  python scripts/estimate_local.py data/vdp_M_60.pkl Flumen GradientDescent 0.5
 ```
 and 
 ```shell
@@ -65,11 +65,11 @@ this will save the corresponding figure in `./results/estimation/vdp/results.pdf
 ### Monte Carlo Experiment
 To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used in figures 7 and 8:
 ```shell
-  python scripts/MC_local.py data/ctm/M_60.pkl Flumen BFGS parameter_generation/ctm_param.yaml --n_runs 50 
+  python scripts/MC_local.py data/ctm_M_60.pkl Flumen BFGS parameter_generation/ctm_param.yaml --n_runs 50 
 ```
 and
 ```shell
-  python scripts/MC_local.py data/ctm/M_60.pkl Euler BFGS parameter_generation/ctm_param.yaml --n_runs 50 --dt 0.002
+  python scripts/MC_local.py data/ctm_M_60.pkl Euler BFGS parameter_generation/ctm_param.yaml --n_runs 50 --dt 0.002
 ```
 which will create results in `./results/MC/ctm/Flumen/results.dict.pkl` and `./results/MC/ctm/Euler/results.dict.pkl`, respectively.
 

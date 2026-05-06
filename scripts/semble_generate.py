@@ -1,0 +1,169 @@
+from flumen import ParamaterisedRawTrajectoryDataset
+from semble import (
+    ParameterisedTrajectorySampler,
+    TSamplerSpec,
+    make_trajectory_sampler,
+)
+from argparse import ArgumentParser, ArgumentTypeError
+from pathlib import Path
+
+import pickle
+import yaml
+
+
+def percentage(value):
+    value = int(value)
+
+    if not (0 <= value <= 100):
+        raise ArgumentTypeError(f"{value} is not a valid percentage")
+
+    return value
+
+
+def parse_args():
+    ap = ArgumentParser()
+
+    ap.add_argument(
+        "settings",
+        type=str,
+        help="Path to a YAML file containing the parameters"
+        " defining the trajectory sampler.",
+    )
+
+    ap.add_argument(
+        "output_name", type=str, help="File name for writing the data to disk."
+    )
+
+    ap.add_argument(
+        "--time_horizon", type=float, help="Time horizon", default=10.0
+    )
+
+    ap.add_argument(
+        "--n_trajectories",
+        type=int,
+        help="Number of trajectories to sample",
+        default=100,
+    )
+
+    ap.add_argument(
+        "--n_samples",
+        type=int,
+        help="Number of state samples per trajectory",
+        default=50,
+    )
+
+    ap.add_argument(
+        "--noise_std",
+        type=float,
+        help="Standard deviation of measurement noise",
+        default=0.0,
+    )
+
+    ap.add_argument(
+        "--noise_seed", type=int, help="Measurement noise seed", default=None
+    )
+
+    ap.add_argument(
+        "--data_split",
+        nargs=2,
+        type=percentage,
+        help="Percentage of data used for validation and test sets",
+        default=[20, 20],
+    )
+
+    return ap.parse_args()
+
+
+def generate(
+    args, trajectory_sampler: ParameterisedTrajectorySampler, postprocess=[]
+):
+    if args.data_split[0] + args.data_split[1] >= 100:
+        raise Exception("Invalid data split.")
+
+    n_val = int(args.n_trajectories * (args.data_split[0] / 100.0))
+    n_test = int(args.n_trajectories * (args.data_split[1] / 100.0))
+    n_train = args.n_trajectories - n_val - n_test
+
+    def get_example():
+        x0, t, y, u, parameter = trajectory_sampler.get_example(
+            args.time_horizon, args.n_samples
+        )
+        return {
+            "init_state": x0,
+            "time": t,
+            "state": y,
+            "control": u,
+            "parameter": parameter,
+        }
+
+    train_data_ = [get_example() for _ in range(n_train)]
+    trajectory_sampler.reset_rngs()
+
+    val_data = [get_example() for _ in range(n_val)]
+    trajectory_sampler.reset_rngs()
+
+    test_data = [get_example() for _ in range(n_test)]
+
+    train_data = ParamaterisedRawTrajectoryDataset(
+        train_data_,
+        trajectory_sampler.dims(),
+        delta=trajectory_sampler._delta,
+        output_mask=trajectory_sampler._dyn.mask,
+        noise_std=args.noise_std,
+    )
+
+    val_data = ParamaterisedRawTrajectoryDataset(
+        val_data,
+        trajectory_sampler.dims(),
+        delta=trajectory_sampler._delta,
+        output_mask=trajectory_sampler._dyn.mask,
+        noise_std=args.noise_std,
+    )
+
+    test_data = ParamaterisedRawTrajectoryDataset(
+        test_data,
+        trajectory_sampler.dims(),
+        delta=trajectory_sampler._delta,
+        output_mask=trajectory_sampler._dyn.mask,
+        noise_std=args.noise_std,
+    )
+
+    for d in (train_data, val_data, test_data):
+        for p in postprocess:
+            p(d)
+
+    return train_data, val_data, test_data
+
+
+def main():
+    args = parse_args()
+
+    with open(args.settings, "r") as f:
+        settings: TSamplerSpec = yaml.load(f, Loader=yaml.FullLoader)
+
+    sampler: ParameterisedTrajectorySampler = make_trajectory_sampler(settings)
+    postprocess = []
+
+    train_data, val_data, test_data = generate(
+        args, sampler, postprocess=postprocess
+    )
+
+    data = {
+        "train": train_data,
+        "val": val_data,
+        "test": test_data,
+        "settings": settings,
+        "args": vars(args),
+    }
+
+    
+    output_dir = Path("./data/")
+    output_dir.mkdir(exist_ok=True)
+
+    # Write to disk
+    with open(output_dir.joinpath(args.output_name + ".pkl"), "wb") as f:
+        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+if __name__ == "__main__":
+    main()
