@@ -362,7 +362,7 @@ def main(args):
     for t in times:
         ax.axvline(x=t, alpha=0.2)
     plt.tight_layout()  # helps before saving
-    save_dir = "results/timings/ctm"
+    save_dir = "results/simulation_performance/ctm"
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig(f"{save_dir}/traj_timings.pdf")
     plt.show()

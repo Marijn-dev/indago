@@ -339,7 +339,7 @@ def main(args):
     times_and_errors = times_and_errors.explode("Relative error").reset_index(
         drop=True
     )
-    save_dir = "results/timings/ctm"
+    save_dir = "results/simulation_performance/ctm"
     os.makedirs(save_dir, exist_ok=True)
     times_and_errors.to_pickle(f"{save_dir}/grad_timings.pkl")
 

@@ -1,5 +1,5 @@
 # indago
----
+
 A package for estimating parameters in control systems. 
 
 This repository also contains the data and scripts used to reproduce and generate the results presented in [Miguel Aguiar, Marijn Ruiter, Amritam Das and Karl H. Johansson, _Flumen: Flow function learning for surrogate modelling of control systems (2026)]
@@ -8,7 +8,35 @@ The corresponding models and data used in the paper can be found in the `./model
 
 The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
 
-## Trajectory Simulation
+## Test Set Performance and Trajectory Visualization
+The datasets containing the testsets available [HERE]. The reported RRMSE test losses can be calculated using the `./scripts/create_data.py` script:
+```shell
+  python scripts/test_loss.py [data_path]
+```
+where `[data_path]`, is the path to the dataset.
+
+To simulate and visualize some model predictions, use the `./scripts/trajectory_simulation_vdp.py` and `./scripts/trajectory_simulation_ctm.py` scripts:
+```shell
+  python scripts/trajectory_simulation_vdp.py
+```
+and 
+```shell
+  python scripts/trajectory_simulation_ctm.py
+```
+which will save the plots in figures 3 and 5 in the folders `./results/trajectory_simulation/vdp/` and `./results/trajectory_simulation/ctm/`, respectively. To simulate different trajectories, change the NUMPY_RNG_SEED value in the script.
+
+## Simulation Performance
+To create the trajectory simulation result in the figure 6 (a), use the `./scripts/time_traj_eval.py`:
+```shell
+  python scripts/time_traj_eval.py --n_traj_samples 50 --n_times_samples 100 --time_horizons 25 --dts 0.002 0.001 0.0005
+```
+which will save the figure in `./results/simulation_performance/ctm/traj_timings.pdf`
+
+To create the gradient computation result in the figure 6 (b), use the `./scripts/time_grad_eval.py`:
+```shell
+  python scripts/time_grad_eval.py --n_traj_samples 50 --time_horizons 25 --dts 0.002 0.001 0.0005 0.0002
+```
+which will save the figure in `./results/simulation_performance/ctm/grad_timings.pdf`
 
 ## Parameter Estimation
 The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
@@ -34,8 +62,8 @@ These results can then be analyzed and compared using the `./scripts/estimate_ev
 ```
 this will save the corresponding figure in `./results/estimation/vdp/results.pdf`.
 
-### Monte Carlo experiment
-To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used to generate figure 6 and 7:
+### Monte Carlo Experiment
+To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used in figures 6 and 7:
 ```shell
   python scripts/MC_local.py data/ctm/M_60.pkl Flumen BFGS parameter_generation/ctm_param.yaml --n_runs 50 
 ```
