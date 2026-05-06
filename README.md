@@ -4,15 +4,9 @@ A package for estimating parameters in control systems.
 
 This repository also contains the data and scripts used to reproduce and generate the results presented in [Miguel Aguiar, Marijn Ruiter, Amritam Das and Karl H. Johansson, _Flumen: Flow function learning for surrogate modelling of control systems (2026)]
 
-The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
+The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package. The trained models used in the paper can be found in the `./models` folder.
 
-The models used in the paper can be found in the `./models` folder.
-
-To create the data, the [`semble`](https://github.com/Marijn-dev/semble/tree/parameterised-dynamics) package is requied. 
-
-The data used for the parameter estimation experiments in the paper can be found in the `./data` folder.
-
-The data used for training (and calculation of the test set RRMSE error) can be downloaded [HERE].
+To create the data, the [`semble`](https://github.com/Marijn-dev/semble/tree/parameterised-dynamics) package is required. The data used for the parameter estimation experiments in the paper can be found in the `./data` folder. The data used for training (and calculation of the test set RRMSE error) can be downloaded [HERE].
 
 ## Test Set Performance and Trajectory Visualization
 The reported RRMSE test losses in the paper can be calculated using the `./scripts/create_data.py` script:
