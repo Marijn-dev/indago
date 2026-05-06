@@ -7,6 +7,7 @@ The corresponding models and data used in the paper can be found in the `./model
 
 The Flumen models are trained using the [`flumen-jax`](https://github.com/Marijn-dev/flumen-jax/tree/parameterised-dynamics) package.
 
+## Parameter Estimation
 The data for a parameter estimation experiment can be created using the `./scripts/create_data.py` script. For example, to generate Van der Pol data with the same settings as in Table 1 (i):
 ```shell
   python scripts/create_data.py --n_trajectories 100 --n_samples 200 --time_horizon 15 data/vdp/vdp.yaml M_60
