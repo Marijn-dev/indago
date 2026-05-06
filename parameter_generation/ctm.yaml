@@ -1,12 +1,12 @@
 name: Product
 args:
-  # location 1
+  # sigma
   - name: Uniform
     args:
       low: 0.1
       high: 0.9
 
-  # value 1
+  # q
   - name: Uniform
     args:
       low: 0.20

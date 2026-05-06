@@ -1,4 +1,5 @@
 name: Uniform 
 args:
+  # Damping coefficient
   low: 0.0
   high: 2.0
