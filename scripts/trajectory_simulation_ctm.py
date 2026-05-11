@@ -1,4 +1,5 @@
 from pathlib import Path
+from argparse import ArgumentParser
 
 import os
 import equinox
@@ -133,9 +134,16 @@ def compute_trajectories(
     return time_vector, y_scipy, y_flumen, dynf_np
 
 
-def main():
-    path = "models/ctm/"
-    model_path = Path(path)
+def main(args):
+    if args.wandb:
+        import wandb
+
+        api = wandb.Api()
+        model_artifact = api.artifact(args.model_path)
+        model_path = Path(model_artifact.download())
+
+    else:
+        model_path = Path(args.model_path)
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
@@ -187,7 +195,13 @@ def main():
     os.makedirs(save_dir, exist_ok=True)  # creates folder if it doesn't exist
     xx = dynamics.get_space_axis()
     for trajectory in range(0, n_trajectories):
-        fig, ax = plt.subplots(4, 1, figsize=(7,9), sharex=False, constrained_layout=True,  gridspec_kw={"height_ratios": [3, 3, 2.0, 2.0]}
+        fig, ax = plt.subplots(
+            4,
+            1,
+            figsize=(7, 9),
+            sharex=False,
+            constrained_layout=True,
+            gridspec_kw={"height_ratios": [3, 3, 2.0, 2.0]},
         )
         for k, ax_ in enumerate(ax[: y_true.shape[-1]]):
             ax[0].set_title("True state")
@@ -217,7 +231,7 @@ def main():
         cbar.set_label("Density")
         ax[1].sharex(ax[0])
         ax[2].sharex(ax[0])
-        
+
         t_u = np.linspace(0.0, time_horizon, len(u[trajectory]))
         ax[-2].step(t_u, u[trajectory].squeeze(), where="post")
         ax[-2].set_xlabel("$t$")
@@ -241,5 +255,23 @@ def main():
         plt.close(fig)
 
 
+def parse_args():
+    ap = ArgumentParser()
+
+    ap.add_argument(
+        "model_path",
+        type=str,
+        help="Path to model folder",
+    )
+
+    ap.add_argument(
+        "--wandb",
+        action="store_true",
+        help="use if model is wandb",
+    )
+
+    return ap.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    main(parse_args())

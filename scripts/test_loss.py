@@ -51,14 +51,16 @@ def main(args):
     with data_path.open("rb") as f:
         data = pickle.load(f)
     delta = data["settings"]["control_delta"]
-    dynamics_name = data["settings"]["dynamics"]["name"]
 
-    if dynamics_name == "ParameterisedCellTransmissionModel":
-        model_path = Path("models/ctm/")
-    elif dynamics_name == "VanDerPolParameterised":
-        model_path = Path("models/vdp/")
+    if args.wandb:
+        import wandb
+
+        api = wandb.Api()
+        model_artifact = api.artifact(args.model_path)
+        model_path = Path(model_artifact.download())
+
     else:
-        print("No model for dynamics known")
+        model_path = Path(args.model_path)
 
     with open(model_path / "metadata.yaml", "r") as f:
         metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
@@ -101,10 +103,22 @@ def main(args):
 
 def parse_args():
     ap = ArgumentParser()
+
     ap.add_argument(
         "data_path",
         type=str,
-        help="Path to data folder, should correspond to model",
+        help="Path to data folder",
+    )
+
+    ap.add_argument(
+        "model_path",
+        type=str,
+        help="Path to model folder",
+    )
+    ap.add_argument(
+        "--wandb",
+        action="store_true",
+        help="use if model is wandb",
     )
 
     return ap.parse_args()

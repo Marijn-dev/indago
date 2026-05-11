@@ -11,17 +11,17 @@ To create the data, the [`semble`](https://github.com/Marijn-dev/semble/tree/par
 ## Test Set Performance and Trajectory Visualization
 The reported RRMSE test losses in the paper can be calculated using the `./scripts/create_data.py` script:
 ```shell
-  python scripts/test_loss.py [data_path]
+  python scripts/test_loss.py [data_path] [model_path]
 ```
-where `[data_path]` is the path to the dataset.
+where `[data_path]` and `[model_path]` are the paths to the dataset and model, respectively.
 
 To simulate and visualize some model predictions, use the `./scripts/trajectory_simulation_vdp.py` and `./scripts/trajectory_simulation_ctm.py` scripts:
 ```shell
-  python scripts/trajectory_simulation_vdp.py
+  python scripts/trajectory_simulation_vdp.py models/vdp/
 ```
 and 
 ```shell
-  python scripts/trajectory_simulation_ctm.py
+  python scripts/trajectory_simulation_ctm.py models/ctm/
 ```
 which will save the plots in figures 3 and 5 in the folders `./results/trajectory_simulation/vdp/` and `./results/trajectory_simulation/ctm/`, respectively. To simulate different trajectories, change the NUMPY_RNG_SEED value in the script.
 
