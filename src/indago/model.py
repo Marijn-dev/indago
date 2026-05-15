@@ -4,7 +4,7 @@ from .typing import State
 from jaxtyping import Float
 from semble.dynamics import (
     ParameterisedCellTransmissionModel,
-    VanDerPolParameterised,
+    ParameterisedVanDerPol,
 )
 
 import diffrax as dfx
@@ -159,7 +159,7 @@ class ParameterisedCellTransmissionModel_Numpy:
 
 
 class ParameterisedVanDerPol_Numpy:
-    def __init__(self, dynamics: VanDerPolParameterised, delta):
+    def __init__(self, dynamics: ParameterisedVanDerPol, delta):
         super().__init__()
         self.dynamics = dynamics
         self.delta = delta

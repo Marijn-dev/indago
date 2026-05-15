@@ -25,12 +25,12 @@ def return_dynamics_jax(data_settings):
     dynamics: Dynamics = get_dynamics(which, data_settings["dynamics"]["args"])
     delta = data_settings["control_delta"]
 
-    if which == "VanDerPolParameterised":
-        return Dynamics_JAX(dynamics, delta)
-    elif which == "ParameterisedCellTransmissionModel":
+    if which == "ParameterisedCellTransmissionModel":
+        # custom implementation
         return ParameterisedCellTransmissionModel_Jax(dynamics, delta)
     else:
-        print(f"Dynamics {which} not implemented")
+        # standard implementation
+        return Dynamics_JAX(dynamics, delta)
 
 
 def return_integrator(which: str) -> dfx.AbstractERK:
@@ -100,9 +100,7 @@ def print_losses(
 
 def get_optimizer(which: str) -> optx.AbstractMinimiser:
     if which == "BFGS":
-        return optx.BFGS(
-            atol=1e-12, rtol=1e-3
-        ) 
+        return optx.BFGS(atol=1e-12, rtol=1e-3)
     elif which == "GradientDescent":
         return optx.GradientDescent(atol=1e-12, rtol=1e-3, learning_rate=2e-2)
     elif which == "Adam":
