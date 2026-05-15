@@ -1,5 +1,5 @@
 from .typing import Parameter
-from flumen import ParamaterisedRawTrajectoryDataset
+from flumen import RawTrajectoryDataset
 from jaxtyping import Array, Float
 import jax
 import jax.numpy as jnp
@@ -17,7 +17,8 @@ class RawNumPyDataset:
     control_dim: int
     parameter_dim: int
 
-    def __init__(self, data: ParamaterisedRawTrajectoryDataset):
+    def __init__(self, data: RawTrajectoryDataset):
+        # data.init_state is concatenation of x0 and parameter
         (
             self.state,
             self.init_state,
@@ -28,13 +29,12 @@ class RawNumPyDataset:
             jnp.asarray,
             (
                 data.state,
-                data.init_state,
+                data.init_state[:, : -data.parameter_dim],
                 data.control_seq,
                 data.time,
-                data.parameter,
+                data.init_state[:, -data.parameter_dim :],
             ),
         )
-
         self.n_traj = data.n_traj
         self.delta = data.delta
         self.state_dim = data.state_dim
@@ -73,7 +73,7 @@ class TestNumPyDataset:
     control_dim: int
     parameter_dim: int
 
-    def __init__(self, data: ParamaterisedRawTrajectoryDataset):
+    def __init__(self, data: RawTrajectoryDataset):
         (
             self.state,
             self.init_state,
@@ -84,10 +84,10 @@ class TestNumPyDataset:
             jnp.asarray,
             (
                 data.state,
-                data.init_state,
+                data.init_state[:, : -data.parameter_dim],
                 data.control_seq,
                 data.time,
-                data.parameter,
+                data.init_state[:, -data.parameter_dim :],
             ),
         )
 

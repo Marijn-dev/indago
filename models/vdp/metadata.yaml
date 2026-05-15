@@ -6,39 +6,4 @@ args:
   encoder_hsz: 128
   feature_dim: 64
   output_dim: 2
-  parameter_dim: 1
-  state_dim: 2
-  use_parameter: true
-data_args:
-  data_split:
-  - 20
-  - 20
-  n_samples: 200
-  n_trajectories: 5000
-  noise_seed: null
-  noise_std: 0.0
-  output_name: pvdp_U_0_2_N5000
-  settings: data_generation/pvdp.yaml
-  time_horizon: 15.0
-data_path: /cephyr/users/marijn/Alvis/Source/flumen-jax/data/pvdp_U_0_2_N5000.pkl
-data_settings:
-  control_delta: 0.5
-  dynamics:
-    args:
-      parameter_generator:
-        args:
-          high: 2.0
-          low: 0.0
-        name: Uniform
-    name: VanDerPolParameterised
-  initial_state_generator:
-    args:
-      max: 4.0
-      min: -4.0
-      n: 2
-    name: UniformInitialState
-  sequence_generator:
-    args:
-      period: 2
-    name: GaussianSqWave
-framework: equinox
+  state_dim: 3

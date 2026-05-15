@@ -1,4 +1,4 @@
-from flumen import ParamaterisedRawTrajectoryDataset
+from flumen import RawTrajectoryDataset
 from semble import (
     ParameterisedTrajectorySampler,
     TSamplerSpec,
@@ -104,7 +104,7 @@ def generate(
 
     test_data = [get_example() for _ in range(n_test)]
 
-    train_data = ParamaterisedRawTrajectoryDataset(
+    train_data = RawTrajectoryDataset(
         train_data_,
         trajectory_sampler.dims(),
         delta=trajectory_sampler._delta,
@@ -112,7 +112,7 @@ def generate(
         noise_std=args.noise_std,
     )
 
-    val_data = ParamaterisedRawTrajectoryDataset(
+    val_data = RawTrajectoryDataset(
         val_data,
         trajectory_sampler.dims(),
         delta=trajectory_sampler._delta,
@@ -120,7 +120,7 @@ def generate(
         noise_std=args.noise_std,
     )
 
-    test_data = ParamaterisedRawTrajectoryDataset(
+    test_data = RawTrajectoryDataset(
         test_data,
         trajectory_sampler.dims(),
         delta=trajectory_sampler._delta,
@@ -156,7 +156,6 @@ def main():
         "args": vars(args),
     }
 
-    
     output_dir = Path("./data/")
     output_dir.mkdir(exist_ok=True)
 
