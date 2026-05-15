@@ -11,7 +11,7 @@ import yaml
 from flumen_jax import Flumen
 from scipy.integrate import solve_ivp
 from semble.dynamics import (
-    VanDerPolParameterised,
+    ParameterisedVanDerPol,
 )
 from semble.initial_state import (
     InitialStateGenerator,
@@ -50,7 +50,7 @@ def solve_flumen_traj(flat_model, model_treedef, t, x0, u, delta, params):
 
 
 def sample_features(
-    dynamics: VanDerPolParameterised,
+    dynamics: ParameterisedVanDerPol,
     init_state_gen: InitialStateGenerator,
     seq_gen: SequenceGenerator,
     n_samples: int,
@@ -80,7 +80,7 @@ def compute_trajectories(
     flumen: Flumen,
     time_horizon: float,
     n_time_samples: int,
-    dynamics: VanDerPolParameterised,
+    dynamics: ParameterisedVanDerPol,
     x0,
     u,
     params,
@@ -92,7 +92,7 @@ def compute_trajectories(
             y[k] = func(x_, u_, params_)
 
     time_vector = np.linspace(0.0, time_horizon, n_time_samples)
-    dynf_np = ParameterisedVanDerPol_Numpy(VanDerPolParameterised, delta)
+    dynf_np = ParameterisedVanDerPol_Numpy(ParameterisedVanDerPol, delta)
 
     def scipy_func(x, u, params):
         return solve_ivp(
@@ -154,7 +154,7 @@ def main(args):
     )
 
     ds = metadata["data_settings"]
-    dynamics = VanDerPolParameterised(**ds["dynamics"]["args"])
+    dynamics = ParameterisedVanDerPol(**ds["dynamics"]["args"])
 
     seq_gen = get_sequence_generator(
         ds["sequence_generator"]["name"],
