@@ -31,7 +31,7 @@ def parse_args():
     ap.add_argument(
         "method",
         type=str,
-        help="Method to use for estimation. Supported: Dopri5, Dopri8, Tsit5, Euler, Flumen",
+        help="Method to use for estimation. Supported: Dopri5, Dopri8, Tsit5, Euler, [model_path], where model_path is the path to a Flumen model",
         default="Flumen",
     )
 
@@ -102,24 +102,38 @@ def main():
     )
 
     # Load in and create appropriate model
-    dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
-    dynamics_name = data["settings"]["dynamics"]["name"]
-    if dynamics_name == "ParameterisedCellTransmissionModel":
-        model_path = Path("models/ctm/")
-        save_dir = f"results/estimation/ctm/{args.method}"
-    elif dynamics_name == "VanDerPolParameterised":
-        model_path = Path("models/vdp/")
-        save_dir = f"results/estimation/vdp/{args.method}"
-    with open(model_path / "metadata.yaml", "r") as f:
-        metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+    if args.method in ["Dopri5", "Dopri8", "Tsit5", "Euler"]:
+        method_name = args.method
+        dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
+        model: DiffraxModel = return_model(
+            args.method,
+            dynamics_jax,
+            None,
+            None,
+            args.dt,
+        )
+    else:
+        method_name = "Flumen"
+        model_path = Path(args.method)
+        with open(model_path / "metadata.yaml", "r") as f:
+            metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+            model: Flumen = return_model(
+                method_name,
+                None,
+                metadata,
+                model_path,
+                None,
+            )
 
-    model: Flumen | DiffraxModel = return_model(
-        args.method,
-        dynamics_jax,
-        metadata,
-        model_path,
-        args.dt,
-    )
+    # save directory
+    dynamics_name = data["settings"]["dynamics"]["name"]
+    if dynamics_name == "VanDerPolParameterised":
+        dyn_name = "vdp"
+    elif dynamics_name == "ParameterisedCellTransmissionModel":
+        dyn_name = "ctm"
+    else:
+        dyn_name = dynamics_name
+    save_dir = f"results/estimation/{dyn_name}/{method_name}"
 
     # Start Weights & Biases
     run = wandb.init(

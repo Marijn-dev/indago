@@ -48,7 +48,7 @@ This will create a data file in `./data/vdp_M_60.pkl`.
 ### Single Experiment
 This data can be used for a parameter estimation experiment, using either `./scripts/estimate_local.py` or `./scripts/estimate_wandb.py`. For example, to recreate the result in Table 1 (i) that uses gradient descent and $\hat{\theta}_0=0.5$:
 ```shell
-  python scripts/estimate_local.py data/vdp_M_60.pkl Flumen GradientDescent 0.5
+  python scripts/estimate_local.py data/vdp_M_60.pkl models/vdp/ GradientDescent 0.5
 ```
 and 
 ```shell
@@ -65,7 +65,7 @@ this will save the corresponding figure in `./results/estimation/vdp/results.pdf
 ### Monte Carlo Experiment
 To run a Monte carlo experiment, use either `./scripts/MC_local.py` or `./scripts/MC_wandb.py`. For example, to recreate the results used in figures 7 and 8:
 ```shell
-  python scripts/MC_local.py data/ctm_M_60.pkl Flumen BFGS parameter_generation/ctm.yaml --n_runs 50 
+  python scripts/MC_local.py data/ctm_M_60.pkl models/ctm/ BFGS parameter_generation/ctm.yaml --n_runs 50 
 ```
 and
 ```shell
