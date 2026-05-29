@@ -127,7 +127,7 @@ def main():
 
     # save directory
     dynamics_name = data["settings"]["dynamics"]["name"]
-    if dynamics_name == "VanDerPolParameterised":
+    if dynamics_name == "ParameterisedVanDerPol":
         dyn_name = "vdp"
     elif dynamics_name == "ParameterisedCellTransmissionModel":
         dyn_name = "ctm"

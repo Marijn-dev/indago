@@ -111,7 +111,7 @@ def main():
         data = pickle.load(f)
 
     train_data = RawNumPyDataset(data["train"])
-
+    dynamics_name = data["settings"]["dynamics"]["name"]
     y, x0, u, t = train_data[0:]
     train_data_args = (
         jnp.array(y),
@@ -123,24 +123,38 @@ def main():
     )
 
     # Load in and create appropriate model
-    dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
-    dynamics_name = data["settings"]["dynamics"]["name"]
-    if dynamics_name == "ParameterisedCellTransmissionModel":
-        model_path = Path("models/ctm/")
-        save_dir = f"results/MC/ctm/{args.method}"
-    elif dynamics_name == "VanDerPolParameterised":
-        model_path = Path("models/vdp/")
-        save_dir = f"results/MC/vdp/{args.method}"
-    with open(model_path / "metadata.yaml", "r") as f:
-        metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+    if args.method in ["Dopri5", "Dopri8", "Tsit5", "Euler"]:
+        method_name = args.method
+        dynamics_jax: Dynamics_JAX = return_dynamics_jax(data["settings"])
+        model: DiffraxModel = return_model(
+            args.method,
+            dynamics_jax,
+            None,
+            None,
+            args.dt,
+        )
+    else:
+        method_name = "Flumen"
+        model_path = Path(args.method)
+        with open(model_path / "metadata.yaml", "r") as f:
+            metadata: dict = yaml.load(f, Loader=yaml.FullLoader)
+            model: Flumen = return_model(
+                method_name,
+                None,
+                metadata,
+                model_path,
+                None,
+            )
 
-    model: Flumen | DiffraxModel = return_model(
-        args.method,
-        dynamics_jax,
-        metadata,
-        model_path,
-        args.dt,
-    )
+    # save directory
+    dynamics_name = data["settings"]["dynamics"]["name"]
+    if dynamics_name == "ParameterisedVanDerPol":
+        dyn_name = "vdp"
+    elif dynamics_name == "ParameterisedCellTransmissionModel":
+        dyn_name = "ctm"
+    else:
+        dyn_name = dynamics_name
+    save_dir = f"results/MC/{dyn_name}/{method_name}"
 
     with open(args.init_params, "r") as f:
         init_params_settings = yaml.load(f, Loader=yaml.FullLoader)
@@ -200,7 +214,7 @@ def main():
         "param_loss": param_loss_list,
         "n_successul_runs": n_succesful_runs,
         "n_runs": args.n_runs,
-        "method": args.method,
+        "method": method_name,
         "dt": args.dt,
         "dynamics": dynamics_name,
     }
