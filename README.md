@@ -28,7 +28,7 @@ which will save the plots in figures 3 and 5 in the folders `./results/trajector
 ## Simulation Performance
 To create the trajectory simulation result in the figure 6 (a), use the `./scripts/time_traj_eval.py` script:
 ```shell
-  python scripts/time_traj_eval.py --n_traj_samples 50 --n_times_samples 100 --time_horizons 25 --dts 0.002 0.001 0.0005
+  python scripts/time_traj_eval.py --n_traj_samples 50 --n_time_samples 100 --time_horizons 25 --dts 0.002 0.001 0.0005
 ```
 which will save the figure in `./results/simulation_performance/ctm/traj_timings.pdf`
 
@@ -75,6 +75,6 @@ which will create results in `./results/MC/ctm/Flumen/results.dict.pkl` and `./r
 
 Then, these results can be analyzed using `./scripts/MC_eval.py`. To recreate figures 7 and 8:
 ```shell
-  python scripts/MC_eval.py results/MC/ctm/Flumen/results_dict.pkl results/estimation/vdp/Tsit5/results_dict.pkl
+  python scripts/MC_eval.py data/ctm_M_60.pkl results/MC/ctm/Flumen/results_dict.pkl results/MC/ctm/Euler/results_dict.pkl
 ```
 which will save the figures in the `./results/MC/ctm/` folder.
